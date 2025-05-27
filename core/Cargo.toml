@@ -1,0 +1,8 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Add specific dependencies for edl-core here
+# For now, we'll keep it minimal. We might need error handling crates like `thiserror` or `anyhow` later.
