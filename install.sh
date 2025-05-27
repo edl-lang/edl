@@ -18,9 +18,11 @@ chmod +x "$INSTALL_DIR/edl"
 
 # Add to PATH if not present
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "\n# Add EDL to PATH" >> "$HOME/.bashrc"
-    echo "export PATH=\"$INSTALL_DIR:$PATH\"" >> "$HOME/.bashrc"
-    echo "Added $INSTALL_DIR to PATH in .bashrc. Restart your shell or run: export PATH=\"$INSTALL_DIR:$PATH\""
+    # Ajout d'une ligne vide et d'un commentaire, avec saut de ligne correct
+    printf "\n# Add EDL to PATH\n" >> "$HOME/.bashrc"
+    # Ajouter le chemin à PATH, avec $PATH échappé pour être évalué plus tard
+    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$HOME/.bashrc"
+    echo "Added $INSTALL_DIR to PATH in .bashrc. Restart your shell or run: export PATH=\"$INSTALL_DIR:\$PATH\""
 fi
 
 echo "edl installed to $INSTALL_DIR/edl"
