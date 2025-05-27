@@ -5,6 +5,7 @@ pub enum TokenKind {
     String(String),
     Identifier(String),
     True,
+    Type,
     False,
     Let,
     Fn,
@@ -39,6 +40,7 @@ pub enum TokenKind {
     DotDot,
     Error(String),
     Eof,
+    Print,
 }
 
 #[derive(Debug, Clone)]
