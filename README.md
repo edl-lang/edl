@@ -1,4 +1,4 @@
-# EDL (Easy Domain Language)
+# EDL (Essential Development Language)
 
 EDL is a simple, domain-oriented programming language designed to enable quick scripting and automation with a clear and modern syntax.
 
