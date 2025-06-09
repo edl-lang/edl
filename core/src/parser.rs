@@ -530,6 +530,22 @@ impl<'a> Parser<'a> {
                 line: self.curr.line,
                 col: self.curr.col,
             }),
+            TokenKind::LBracket => {
+                self.advance();
+                let mut elements = Vec::new();
+                if self.curr.kind != TokenKind::RBracket {
+                    loop {
+                        elements.push(self.parse_expr()?);
+                        if self.curr.kind == TokenKind::Comma {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(Expr::List(elements))
+            }
             _ => Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken,
                 message: format!("Token inattendu : {:?}", self.curr),

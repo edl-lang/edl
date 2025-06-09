@@ -11,6 +11,7 @@ pub enum Value {
     Function(Function),
     Type(Type),
     Null,
+    List(Vec<Value>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +265,12 @@ impl Interpreter {
                     _ => Err(RuntimeError::Message("Can only call functions!".to_string())),
                 }
             }
+            Expr::List(elements) => {
+                let vals = elements.iter()
+                    .map(|e| self.eval_expr(e))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Value::List(vals))
+            }
             _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", expr))),
         }
     }
@@ -277,6 +284,7 @@ fn is_truthy(val: &Value) -> bool {
         Value::String(s) => !s.is_empty(),
         Value::Function(_) => true,
         Value::Type(_) => true,
+        Value::List(vals) => !vals.is_empty(),
     }
 }
 
@@ -358,5 +366,9 @@ fn value_to_string(val: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Function(_) => "<function>".to_string(),
         Value::Type(t) => format!("<type {}>", t.name),
+        Value::List(vals) => {
+            let items: Vec<String> = vals.iter().map(|v| value_to_string(v)).collect();
+            format!("[{}]", items.join(", "))
+        }
     }
 }

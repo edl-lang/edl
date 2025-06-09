@@ -32,28 +32,31 @@ fn run_file(file: &str) {
     let code = match fs::read_to_string(file) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to read file '{}': {}", file, e);
-            return;
+            eprintln!("❌ Failed to read file '{}': {}", file, e);
+            std::process::exit(1);
         }
     };
-
-    println!("Parsing file '{}', content:\n{}", file, code);
 
     let mut parser = EdlParser::new(&code);
     let stmts = match parser.parse() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Parse error in file '{}': {:?}", file, e); // <--- ici {:?}
-            return;
+            eprintln!("❌ Parse error in file '{}': {:?}", file, e);
+            std::process::exit(1);
         }
     };
 
     let mut interp = Interpreter::new();
 
     for stmt in stmts {
-        if let Err(e) = interp.eval_stmt(&stmt) {
-            eprintln!("Runtime error: {:?}", e);
-            break;
+        match interp.eval_stmt(&stmt) {
+            Ok(_val) => {
+                // Ne rien afficher ici : print() est déjà géré dans le runtime
+            }
+            Err(e) => {
+                eprintln!("❌ Runtime error: {:?}", e);
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -61,7 +64,7 @@ fn run_file(file: &str) {
 fn start_repl() {
     let mut rl = Editor::<()>::new().unwrap();
     let mut interp = Interpreter::new();
-    println!("EDL REPL. Type 'exit' or Ctrl+D to quit.");
+    println!("✨ Welcome to the EDL REPL! Type 'exit' or Ctrl+D to quit.");
     loop {
         let readline = rl.readline("edl> ");
         match readline {

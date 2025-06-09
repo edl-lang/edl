@@ -52,6 +52,8 @@ pub enum TokenKind {
     Break,
     Continue,
     Yield,
+    LBracket,
+    RBracket,
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +242,9 @@ impl<'a> Lexer<'a> {
                     }
                     return self.next_token();
                 }
+
+                '[' => { self.advance(); return Ok(self.single(TokenKind::LBracket)); }
+                ']' => { self.advance(); return Ok(self.single(TokenKind::RBracket)); }
 
                 other => {
                     let c = other.to_string();
