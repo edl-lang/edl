@@ -1,0 +1,66 @@
+{
+  "name": "EDL",
+  "scopeName": "source.edl",
+  "fileTypes": ["edl"],
+  "patterns": [
+    {
+      "name": "keyword.control.edl",
+      "match": "\\b(let|fn|return|if|else|while|for|in|import|type|const|match|as|pub|mod|struct|enum|break|continue|yield|print)\\b"
+    },
+    {
+      "name": "constant.language.boolean.edl",
+      "match": "\\b(true|false)\\b"
+    },
+    {
+      "name": "constant.numeric.edl",
+      "match": "\\b\\d+(\\.\\d+)?\\b"
+    },
+    {
+      "name": "string.quoted.double.edl",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.edl",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "comment.line.double-slash.edl",
+      "begin": "//",
+      "end": "$"
+    },
+    {
+      "name": "comment.line.hash.edl",
+      "begin": "#",
+      "end": "$"
+    },
+    {
+      "name": "variable.other.edl",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+    },
+    {
+      "name": "punctuation.separator.edl",
+      "match": "[,;]"
+    },
+    {
+      "name": "punctuation.brackets.round.edl",
+      "match": "[()]"
+    },
+    {
+      "name": "punctuation.brackets.curly.edl",
+      "match": "[{}]"
+    },
+    {
+      "name": "punctuation.brackets.square.edl",
+      "match": "[\\[\\]]"
+    },
+    {
+      "name": "keyword.operator.edl",
+      "match": "(\\+|\\-|\\*|\\/|==|!=|<=|>=|<|>|=|\\.|\\.\\.|!)"
+    }
+  ],
+  "repository": {},
+  "uuid": "edl-tmlanguage-001"
+}

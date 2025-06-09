@@ -1,7 +1,7 @@
-// edl-cli/src/main.rs
+// cli/src/main.rs
 
 use clap::{Parser, Subcommand};
-use rustyline::Editor;
+use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use core::{parser::Parser as EdlParser, runtime::Interpreter};
 
@@ -32,26 +32,28 @@ fn run_file(file: &str) {
     let code = match fs::read_to_string(file) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to read file: {}", e);
+            eprintln!("Failed to read file '{}': {}", file, e);
             return;
         }
     };
+
+    println!("Parsing file '{}', content:\n{}", file, code);
+
     let mut parser = EdlParser::new(&code);
     let stmts = match parser.parse() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Parse error: {:?}", e);
+            eprintln!("Parse error in file '{}': {:?}", file, e); // <--- ici {:?}
             return;
         }
     };
+
     let mut interp = Interpreter::new();
+
     for stmt in stmts {
-        match interp.eval_stmt(&stmt) {
-            Ok(_) => {},
-            Err(e) => {
-                eprintln!("Runtime error: {:?}", e);
-                break;
-            }
+        if let Err(e) = interp.eval_stmt(&stmt) {
+            eprintln!("Runtime error: {:?}", e);
+            break;
         }
     }
 }
@@ -64,26 +66,47 @@ fn start_repl() {
         let readline = rl.readline("edl> ");
         match readline {
             Ok(line) => {
-                if line.trim() == "exit" { break; }
-                rl.add_history_entry(line.as_str());
-                let mut parser = EdlParser::new(&line);
-                match parser.parse() {
-                    Ok(stmts) => {
-                        for stmt in stmts {
-                            match interp.eval_stmt(&stmt) {
-                                Ok(val) => if let core::runtime::Value::Null = val {
-                                    // don't print Null
-                                } else {
-                                    println!("{:?}", val);
-                                },
-                                Err(e) => println!("Runtime error: {:?}", e),
+                let line = line.trim();
+                if line == "exit" {
+                    println!("Goodbye!");
+                    break;
+                }
+                if !line.is_empty() {
+                    rl.add_history_entry(line);
+                    let mut parser = EdlParser::new(line);
+                    match parser.parse() {
+                        Ok(stmts) => {
+                            for stmt in stmts {
+                                match interp.eval_stmt(&stmt) {
+                                    Ok(val) => {
+                                        if let core::runtime::Value::Null = val {
+                                            // don't print Null
+                                        } else {
+                                            println!("{:?}", val);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Runtime error: {:?}", e);
+                                    }
+                                }
                             }
                         }
-                    },
-                    Err(e) => println!("Parse error: {:?}", e),
+                        Err(e) => eprintln!("Parse error: {:?}", e),
+                    }
                 }
-            },
-            Err(_) => break,
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("\nGoodbye!");
+                break;
+            }
+            Err(err) => {
+                eprintln!("Error reading line: {:?}", err);
+                break;
+            }
         }
     }
 }

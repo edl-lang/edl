@@ -1,9 +1,0 @@
-let x = 10; 
-let y = 20; 
-let sum = x + y; 
-
-if sum > 25 {
-    print("Sum is large"); 
-} else {
-    print("Sum is small"); 
-}

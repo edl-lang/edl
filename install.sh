@@ -1,29 +1,39 @@
 #!/usr/bin/env bash
 set -e
 
-# Install script for EDL CLI
+# EDL CLI Install Script
 
-WORKSPACE_DIR=$(dirname "$0")
+WORKSPACE_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$WORKSPACE_DIR"
 
-# Build edl-cli
+# Build the CLI with cargo
+echo "Building EDL CLI..."
 cargo build --release -p cli
 
-# Copy binary to ~/.local/bin
+# Determine binary name and install location
+BINARY_SRC="target/release/cli"
 INSTALL_DIR="$HOME/.local/bin"
+BINARY_DEST="$INSTALL_DIR/edl"
+
+# Ensure install directory exists
 mkdir -p "$INSTALL_DIR"
-cp target/release/cli "$INSTALL_DIR/edl"
 
-chmod +x "$INSTALL_DIR/edl"
+# Copy and set permissions
+cp "$BINARY_SRC" "$BINARY_DEST"
+chmod +x "$BINARY_DEST"
 
-# Add to PATH if not present
-if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    # Ajout d'une ligne vide et d'un commentaire, avec saut de ligne correct
-    printf "\n# Add EDL to PATH\n" >> "$HOME/.bashrc"
-    # Ajouter le chemin à PATH, avec $PATH échappé pour être évalué plus tard
-    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$HOME/.bashrc"
-    echo "Added $INSTALL_DIR to PATH in .bashrc. Restart your shell or run: export PATH=\"$INSTALL_DIR:\$PATH\""
+# Add to PATH if not already present
+if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
+    SHELL_RC=""
+    if [ -n "$ZSH_VERSION" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    else
+        SHELL_RC="$HOME/.bashrc"
+    fi
+    echo -e "\n# Add EDL to PATH" >> "$SHELL_RC"
+    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+    echo "Added $INSTALL_DIR to PATH in $SHELL_RC. Restart your shell or run: export PATH=\"$INSTALL_DIR:\$PATH\""
 fi
 
-echo "edl installed to $INSTALL_DIR/edl"
-echo "Run 'edl run file.edl' or 'edl repl'!"
+echo "✅ EDL installed to $BINARY_DEST"
+echo "➡️  Run 'edl run file.edl' or 'edl repl' to get started!"

@@ -1,40 +1,75 @@
-// core/src/parser.rs
-
+// --- Dépendances et définitions de base ---
 use crate::ast::*;
 use crate::lexer::{Lexer, Token, TokenKind};
 
-#[derive(Debug)]
-pub enum ParseError {
-    UnexpectedToken(Token),
-    UnexpectedEof,
-    Custom(String),
+/// Erreurs possibles lors du parsing
+#[derive(Debug, Clone)]
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub message: String,
+    pub line: usize,
+    pub col: usize,
 }
 
+#[derive(Debug, Clone)]
+pub enum ParseErrorKind {
+    UnexpectedToken,
+    UnexpectedEof,
+    Custom,
+}
+
+/// Le parser EDL, qui transforme une suite de tokens en AST
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     curr: Token,
 }
 
 impl<'a> Parser<'a> {
+    /// Crée un nouveau parser à partir d'une source
     pub fn new(src: &'a str) -> Self {
         let mut lexer = Lexer::new(src);
-        let curr = lexer.next_token();
+        let curr = lexer.next_token().unwrap_or_else(|err| Token {
+            kind: TokenKind::Error(err.message),
+            line: err.line,
+            col: err.col,
+        });
         Parser { lexer, curr }
     }
 
+    /// Passe au token suivant
     fn advance(&mut self) {
-        self.curr = self.lexer.next_token();
+        match self.lexer.next_token() {
+            Ok(token) => self.curr = token,
+            Err(err) => {
+                self.curr = Token {
+                    kind: TokenKind::Error(err.message.clone()),
+                    line: err.line,
+                    col: err.col,
+                };
+            }
+        }
     }
 
+    /// Vérifie et consomme le token attendu
     fn expect(&mut self, kind: &TokenKind) -> Result<(), ParseError> {
         if &self.curr.kind == kind {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError::UnexpectedToken(self.curr.clone()))
+            Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Expected {:?}, found {:?}", kind, self.curr.kind),
+                line: self.curr.line,
+                col: self.curr.col,
+            })
         }
     }
 
+    // =========================
+    //   Entrée principale
+    // =========================
+
+    /// Parse tout le fichier/source en une liste d'instructions (statements)
     pub fn parse(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let mut stmts = Vec::new();
         while self.curr.kind != TokenKind::Eof {
@@ -43,6 +78,11 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
+    // =========================
+    //   Parsing des statements
+    // =========================
+
+    /// Parse une instruction (statement)
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match &self.curr.kind {
             TokenKind::Let => self.parse_let(),
@@ -52,7 +92,11 @@ impl<'a> Parser<'a> {
             TokenKind::While => self.parse_while(),
             TokenKind::For => self.parse_for(),
             TokenKind::Import => self.parse_import(),
+            TokenKind::Break => self.parse_break(),
+            TokenKind::Continue => self.parse_continue(),
+            TokenKind::Print => self.parse_print(),
             TokenKind::LBrace => self.parse_block_stmt(),
+            // Expression seule (ex: appel de fonction, affectation, etc.)
             _ => {
                 let expr = self.parse_expr()?;
                 if self.curr.kind == TokenKind::Semicolon {
@@ -63,12 +107,18 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// let x = ...;
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::Let)?;
         let name = if let TokenKind::Identifier(name) = &self.curr.kind {
             name.clone()
         } else {
-            return Err(ParseError::UnexpectedToken(self.curr.clone()));
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Token inattendu : {:?}", self.curr),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
         };
         self.advance();
         self.expect(&TokenKind::Assign)?;
@@ -79,15 +129,23 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Let { name, expr })
     }
 
+    /// fn nom(...) { ... }
     fn parse_function(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::Fn)?;
         let name = if let TokenKind::Identifier(name) = &self.curr.kind {
             name.clone()
         } else {
-            return Err(ParseError::UnexpectedToken(self.curr.clone()));
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Token inattendu : {:?}", self.curr),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
         };
         self.advance();
         self.expect(&TokenKind::LParen)?;
+
+        // Paramètres de la fonction
         let mut params = Vec::new();
         while self.curr.kind != TokenKind::RParen {
             if let TokenKind::Identifier(param) = &self.curr.kind {
@@ -96,28 +154,43 @@ impl<'a> Parser<'a> {
                 if self.curr.kind == TokenKind::Comma {
                     self.advance();
                 } else if self.curr.kind != TokenKind::RParen {
-                    return Err(ParseError::UnexpectedToken(self.curr.clone()));
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken,
+                        message: format!("Token inattendu : {:?}", self.curr),
+                        line: self.curr.line,
+                        col: self.curr.col,
+                    });
                 }
             } else {
-                return Err(ParseError::UnexpectedToken(self.curr.clone()));
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken,
+                    message: format!("Token inattendu : {:?}", self.curr),
+                    line: self.curr.line,
+                    col: self.curr.col,
+                });
             }
         }
         self.expect(&TokenKind::RParen)?;
+
         let body = self.parse_block()?;
         Ok(Stmt::Function { name, params, body })
     }
 
+    /// return ...;
     fn parse_return(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::Return)?;
         let expr = if self.curr.kind != TokenKind::Semicolon {
             Some(self.parse_expr()?)
-        } else { None };
+        } else {
+            None
+        };
         if self.curr.kind == TokenKind::Semicolon {
             self.advance();
         }
         Ok(Stmt::Return(expr))
     }
 
+    /// if ... { ... } [else { ... }]
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::If)?;
         let condition = self.parse_expr()?;
@@ -125,10 +198,13 @@ impl<'a> Parser<'a> {
         let else_branch = if self.curr.kind == TokenKind::Else {
             self.advance();
             Some(self.parse_block()?)
-        } else { None };
+        } else {
+            None
+        };
         Ok(Stmt::If { condition, then_branch, else_branch })
     }
 
+    /// while ... { ... }
     fn parse_while(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::While)?;
         let condition = self.parse_expr()?;
@@ -136,25 +212,41 @@ impl<'a> Parser<'a> {
         Ok(Stmt::While { condition, body })
     }
 
+    /// for i in ... { ... }
     fn parse_for(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::For)?;
         let var = if let TokenKind::Identifier(name) = &self.curr.kind {
             name.clone()
-        } else { return Err(ParseError::UnexpectedToken(self.curr.clone())); };
+        } else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Token inattendu : {:?}", self.curr),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
+        };
         self.advance();
         self.expect(&TokenKind::In)?;
         let start = self.parse_expr()?;
-        self.expect(&TokenKind::DotDot)?; // Not implemented in lexer, update logic if needed
+        self.expect(&TokenKind::DotDot)?;
         let end = self.parse_expr()?;
         let body = self.parse_block()?;
         Ok(Stmt::For { var, start, end, body })
     }
 
+    /// import "fichier";
     fn parse_import(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::Import)?;
         let path = if let TokenKind::String(path) = &self.curr.kind {
             path.clone()
-        } else { return Err(ParseError::UnexpectedToken(self.curr.clone())); };
+        } else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Token inattendu : {:?}", self.curr),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
+        };
         self.advance();
         if self.curr.kind == TokenKind::Semicolon {
             self.advance();
@@ -162,10 +254,40 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Import(path))
     }
 
+    /// break;
+    fn parse_break(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Break)?;
+        if self.curr.kind == TokenKind::Semicolon {
+            self.advance();
+        }
+        Ok(Stmt::Break)
+    }
+
+    /// continue;
+    fn parse_continue(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Continue)?;
+        if self.curr.kind == TokenKind::Semicolon {
+            self.advance();
+        }
+        Ok(Stmt::Continue)
+    }
+
+    /// print ...;
+    fn parse_print(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Print)?;
+        let expr = self.parse_expr()?;
+        if self.curr.kind == TokenKind::Semicolon {
+            self.advance();
+        }
+        Ok(Stmt::Print(expr))
+    }
+
+    /// { ... }
     fn parse_block_stmt(&mut self) -> Result<Stmt, ParseError> {
         Ok(Stmt::Block(self.parse_block()?))
     }
 
+    /// Parse le contenu d'un bloc { ... }
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
         self.expect(&TokenKind::LBrace)?;
         let mut stmts = Vec::new();
@@ -176,11 +298,16 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    // --- Expression Parsing ---
+    // =========================
+    //   Parsing des expressions
+    // =========================
+
+    /// Expression complète (affectation ou logique)
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.parse_assignment()
     }
 
+    /// Affectation : x = ...
     fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
         let expr = self.parse_logic_or()?;
         if self.curr.kind == TokenKind::Assign {
@@ -189,13 +316,19 @@ impl<'a> Parser<'a> {
             if let Expr::Variable(name) = expr {
                 Ok(Expr::Assign { name, expr: Box::new(value) })
             } else {
-                Err(ParseError::Custom("Invalid assignment target".to_string()))
+                Err(ParseError {
+                    kind: ParseErrorKind::Custom,
+                    message: "Cible d'affectation invalide".to_string(),
+                    line: self.curr.line,
+                    col: self.curr.col,
+                })
             }
         } else {
             Ok(expr)
         }
     }
 
+    /// Opérateur logique OR
     fn parse_logic_or(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_logic_and()?;
         while self.curr.kind == TokenKind::Or {
@@ -204,12 +337,13 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op: BinOp::Or,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Opérateur logique AND
     fn parse_logic_and(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_equality()?;
         while self.curr.kind == TokenKind::And {
@@ -218,12 +352,13 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op: BinOp::And,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Comparaisons ==, !=
     fn parse_equality(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_comparison()?;
         while matches!(self.curr.kind, TokenKind::EqEq | TokenKind::BangEq) {
@@ -237,12 +372,13 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Comparaisons <, <=, >, >=
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_term()?;
         while matches!(self.curr.kind, TokenKind::Lt | TokenKind::Lte | TokenKind::Gt | TokenKind::Gte) {
@@ -258,12 +394,13 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Addition/Soustraction
     fn parse_term(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_factor()?;
         while matches!(self.curr.kind, TokenKind::Plus | TokenKind::Minus) {
@@ -277,12 +414,13 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Multiplication/Division
     fn parse_factor(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_unary()?;
         while matches!(self.curr.kind, TokenKind::Star | TokenKind::Slash) {
@@ -296,26 +434,34 @@ impl<'a> Parser<'a> {
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
-                right: Box::new(right)
+                right: Box::new(right),
             };
         }
         Ok(expr)
     }
 
+    /// Unaires (-, !)
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr.kind {
             TokenKind::Minus => {
                 self.advance();
-                Ok(Expr::Unary { op: UnOp::Neg, expr: Box::new(self.parse_unary()?) })
+                Ok(Expr::Unary {
+                    op: UnOp::Neg,
+                    expr: Box::new(self.parse_unary()?),
+                })
             }
             TokenKind::Bang => {
                 self.advance();
-                Ok(Expr::Unary { op: UnOp::Not, expr: Box::new(self.parse_unary()?) })
+                Ok(Expr::Unary {
+                    op: UnOp::Not,
+                    expr: Box::new(self.parse_unary()?),
+                })
             }
             _ => self.parse_call(),
         }
     }
 
+    /// Appels de fonction et chainage
     fn parse_call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_primary()?;
         loop {
@@ -330,7 +476,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(&TokenKind::RParen)?;
-                expr = Expr::Call { function: Box::new(expr), arguments: args };
+                expr = Expr::Call {
+                    function: Box::new(expr),
+                    arguments: args,
+                };
             } else {
                 break;
             }
@@ -338,6 +487,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    /// Valeurs primaires (littéraux, variables, parenthèses, blocs, lambdas)
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match &self.curr.kind {
             TokenKind::Number(n) => {
@@ -370,9 +520,55 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
             TokenKind::LBrace => {
+                // Expression bloc : { ... }
                 Ok(Expr::Block(self.parse_block()?))
             }
-            _ => Err(ParseError::UnexpectedToken(self.curr.clone())),
+            TokenKind::Fn => self.parse_lambda(), // Lambda anonyme
+            TokenKind::Error(msg) => Err(ParseError {
+                kind: ParseErrorKind::Custom,
+                message: format!("Lexical error: {}", msg),
+                line: self.curr.line,
+                col: self.curr.col,
+            }),
+            _ => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: format!("Token inattendu : {:?}", self.curr),
+                line: self.curr.line,
+                col: self.curr.col,
+            }),
         }
+    }
+
+    /// fn(x, y) { ... }  (lambda anonyme)
+    fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
+        self.expect(&TokenKind::Fn)?;
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while self.curr.kind != TokenKind::RParen {
+            if let TokenKind::Identifier(param) = &self.curr.kind {
+                params.push(param.clone());
+                self.advance();
+                if self.curr.kind == TokenKind::Comma {
+                    self.advance();
+                } else if self.curr.kind != TokenKind::RParen {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken,
+                        message: format!("Token inattendu : {:?}", self.curr),
+                        line: self.curr.line,
+                        col: self.curr.col,
+                    });
+                }
+            } else {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken,
+                    message: format!("Token inattendu : {:?}", self.curr),
+                    line: self.curr.line,
+                    col: self.curr.col,
+                });
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        let body = self.parse_block()?;
+        Ok(Expr::Lambda { params, body })
     }
 }

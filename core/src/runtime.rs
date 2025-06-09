@@ -1,6 +1,6 @@
 // core/src/runtime.rs
 
-use crate::ast::*;
+use crate::ast::{BinOp, UnOp, Expr, Stmt};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -9,6 +9,7 @@ pub enum Value {
     Bool(bool),
     String(String),
     Function(Function),
+    Type(Type),
     Null,
 }
 
@@ -16,6 +17,13 @@ pub enum Value {
 pub struct Function {
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Type {
+    pub name: String,
+    pub fields: HashMap<String, Value>,
+    pub methods: HashMap<String, Function>,
 }
 
 #[derive(Clone)]
@@ -94,11 +102,13 @@ impl Interpreter {
     pub fn eval_stmt(&mut self, stmt: &Stmt) -> Result<Value, RuntimeError> {
         match stmt {
             Stmt::Expr(expr) => self.eval_expr(expr),
+
             Stmt::Let { name, expr } => {
                 let val = self.eval_expr(expr)?;
                 self.env.set(name.clone(), val);
                 Ok(Value::Null)
             }
+
             Stmt::Function { name, params, body } => {
                 let func = Function {
                     params: params.clone(),
@@ -107,6 +117,7 @@ impl Interpreter {
                 self.env.set(name.clone(), Value::Function(func));
                 Ok(Value::Null)
             }
+
             Stmt::Return(expr) => {
                 let val = if let Some(e) = expr {
                     self.eval_expr(e)?
@@ -115,6 +126,7 @@ impl Interpreter {
                 };
                 Err(RuntimeError::Return(val))
             }
+
             Stmt::If { condition, then_branch, else_branch } => {
                 let cond = self.eval_expr(condition)?;
                 if is_truthy(&cond) {
@@ -125,6 +137,7 @@ impl Interpreter {
                     Ok(Value::Null)
                 }
             }
+
             Stmt::While { condition, body } => {
                 while is_truthy(&self.eval_expr(condition)?) {
                     let previous_env = self.env.clone();
@@ -134,6 +147,7 @@ impl Interpreter {
                 }
                 Ok(Value::Null)
             }
+
             Stmt::For { var, start, end, body } => {
                 let start = get_num(&self.eval_expr(start)?) as i64;
                 let end = get_num(&self.eval_expr(end)?) as i64;
@@ -146,8 +160,49 @@ impl Interpreter {
                 }
                 Ok(Value::Null)
             }
+
             Stmt::Import(_) => Ok(Value::Null),
+
             Stmt::Block(stmts) => self.eval_block(stmts),
+
+            Stmt::Break => Err(RuntimeError::Message("Break not implemented".to_string())),
+            Stmt::Continue => Err(RuntimeError::Message("Continue not implemented".to_string())),
+
+            Stmt::Print(expr) => {
+                let val = self.eval_expr(expr)?;
+                println!("{}", value_to_string(&val));
+                Ok(Value::Null)
+            }
+
+            Stmt::Type { name, fields, methods } => {
+                let mut fields_map = HashMap::new();
+                for (field_name, expr) in fields {
+                    let val = self.eval_expr(expr)?;
+                    fields_map.insert(field_name.clone(), val);
+                }
+
+                let mut methods_map = HashMap::new();
+                for stmt in methods {
+                    if let Stmt::Function { name: fn_name, params, body } = stmt {
+                        let func = Function {
+                            params: params.clone(),
+                            body: body.clone(),
+                        };
+                        methods_map.insert(fn_name.clone(), func);
+                    }
+                }
+
+                let type_val = Value::Type(Type {
+                    name: name.clone(),
+                    fields: fields_map,
+                    methods: methods_map,
+                });
+
+                self.env.set(name.clone(), type_val);
+                Ok(Value::Null)
+            }
+
+            _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", stmt))),
         }
     }
 
@@ -159,14 +214,14 @@ impl Interpreter {
             Expr::Variable(name) => {
                 self.env
                     .get(name)
-                    .ok_or_else(|| RuntimeError::Message(format!("Undefined variable '{name}'")))
+                    .ok_or_else(|| RuntimeError::Message(format!("Undefined variable '{}'", name)))
             }
             Expr::Assign { name, expr } => {
                 let val = self.eval_expr(expr)?;
                 if self.env.assign(name, val.clone()) {
                     Ok(val)
                 } else {
-                    Err(RuntimeError::Message(format!("Undefined variable '{name}'")))
+                    Err(RuntimeError::Message(format!("Undefined variable '{}'", name)))
                 }
             }
             Expr::Block(stmts) => self.eval_block(stmts),
@@ -209,34 +264,9 @@ impl Interpreter {
                     _ => Err(RuntimeError::Message("Can only call functions!".to_string())),
                 }
             }
+            _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", expr))),
         }
     }
-}
-
-fn eval_body(body: &[Stmt], interp: &mut Interpreter) -> Result<Value, RuntimeError> {
-    let mut result = Value::Null;
-    for stmt in body {
-        result = interp.eval_stmt(stmt)?;
-    }
-    Ok(result)
-}
-
-fn eval_binary(op: BinOp, l: Value, r: Value) -> Result<Value, RuntimeError> {
-    use BinOp::*;
-    Ok(match op {
-        Add => Value::Number(get_num(&l) + get_num(&r)),
-        Sub => Value::Number(get_num(&l) - get_num(&r)),
-        Mul => Value::Number(get_num(&l) * get_num(&r)),
-        Div => Value::Number(get_num(&l) / get_num(&r)),
-        Eq => Value::Bool(l == r),
-        Neq => Value::Bool(l != r),
-        Lt => Value::Bool(get_num(&l) < get_num(&r)),
-        Lte => Value::Bool(get_num(&l) <= get_num(&r)),
-        Gt => Value::Bool(get_num(&l) > get_num(&r)),
-        Gte => Value::Bool(get_num(&l) >= get_num(&r)),
-        And => Value::Bool(is_truthy(&l) && is_truthy(&r)),
-        Or => Value::Bool(is_truthy(&l) || is_truthy(&r)),
-    })
 }
 
 fn is_truthy(val: &Value) -> bool {
@@ -245,15 +275,88 @@ fn is_truthy(val: &Value) -> bool {
         Value::Null => false,
         Value::Number(n) => *n != 0.0,
         Value::String(s) => !s.is_empty(),
-        _ => true,
+        Value::Function(_) => true,
+        Value::Type(_) => true,
     }
 }
 
 fn get_num(val: &Value) -> f64 {
     match val {
         Value::Number(n) => *n,
-        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
-        Value::Null => 0.0,
         _ => 0.0,
+    }
+}
+
+fn eval_binary(op: BinOp, left: Value, right: Value) -> Result<Value, RuntimeError> {
+    use BinOp::*;
+    match op {
+        Add => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a + b)),
+            (Value::String(a), Value::String(b)) => Ok(Value::String(a + &b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '+'".to_string())),
+        },
+        Sub => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a - b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '-'".to_string())),
+        },
+        Mul => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a * b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '*'".to_string())),
+        },
+        Div => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => {
+                if b == 0.0 {
+                    Err(RuntimeError::Message("Division by zero".to_string()))
+                } else {
+                    Ok(Value::Number(a / b))
+                }
+            }
+            _ => Err(RuntimeError::Message("Invalid operands for '/'".to_string())),
+        },
+        Eq => Ok(Value::Bool(left == right)),
+        Neq => Ok(Value::Bool(left != right)),
+        Lt => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Bool(a < b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '<'".to_string())),
+        },
+        Lte => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Bool(a <= b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '<='".to_string())),
+        },
+        Gt => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Bool(a > b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '>'".to_string())),
+        },
+        Gte => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Ok(Value::Bool(a >= b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '>='".to_string())),
+        },
+        And => match (left, right) {
+            (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a && b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '&&'".to_string())),
+        },
+        Or => match (left, right) {
+            (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a || b)),
+            _ => Err(RuntimeError::Message("Invalid operands for '||'".to_string())),
+        },
+    }
+}
+
+fn eval_body(body: &[Stmt], interpreter: &mut Interpreter) -> Result<Value, RuntimeError> {
+    let mut last = Value::Null;
+    for stmt in body {
+        last = interpreter.eval_stmt(stmt)?;
+    }
+    Ok(last)
+}
+
+fn value_to_string(val: &Value) -> String {
+    match val {
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Null => "null".to_string(),
+        Value::Function(_) => "<function>".to_string(),
+        Value::Type(t) => format!("<type {}>", t.name),
     }
 }
