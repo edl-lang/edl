@@ -27,6 +27,7 @@ pub enum TokenKind {
     Plus,
     Minus,
     Star,
+    Pow, // Ajoute ceci pour **
     Slash,
     EqEq,
     BangEq,
@@ -54,6 +55,9 @@ pub enum TokenKind {
     Yield,
     LBracket,
     RBracket,
+    Colon,      // Ajoute ceci
+    Lambda,     // Ajoute ceci si tu veux supporter les lambdas
+    Native,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +142,7 @@ impl<'a> Lexer<'a> {
                 '}' => { self.advance(); return Ok(self.single(RBrace)); }
                 ',' => { self.advance(); return Ok(self.single(Comma)); }
                 ';' => { self.advance(); return Ok(self.single(Semicolon)); }
+                ':' => { self.advance(); return Ok(self.single(TokenKind::Colon)); } // <-- Ajout du deux-points
 
                 '=' => {
                     self.advance();
@@ -181,7 +186,15 @@ impl<'a> Lexer<'a> {
 
                 '+' => { self.advance(); return Ok(self.single(Plus)); }
                 '-' => { self.advance(); return Ok(self.single(Minus)); }
-                '*' => { self.advance(); return Ok(self.single(Star)); }
+                '*' => {
+                    self.advance();
+                    if self.peek() == Some('*') {
+                        self.advance();
+                        return Ok(self.single(TokenKind::Pow));
+                    } else {
+                        return Ok(self.single(TokenKind::Star));
+                    }
+                }
                 '/' => {
                     self.advance();
                     if self.peek() == Some('/') {
@@ -190,6 +203,26 @@ impl<'a> Lexer<'a> {
                             if c == '\n' { break; }
                             self.advance();
                         }
+                        return self.next_token();
+                    } else if self.peek() == Some('*') {
+                        // Commentaire multi-ligne ou documentation
+                        self.advance();
+                        let mut prev = ' ';
+                        let mut _is_doc = false;
+                        if self.peek() == Some('*') {
+                            // /** ... */ documentation
+                            _is_doc = true;
+                            self.advance();
+                        }
+                        while let Some(c) = self.peek() {
+                            if prev == '*' && c == '/' {
+                                self.advance();
+                                break;
+                            }
+                            prev = c;
+                            self.advance();
+                        }
+                        // Tu pourrais stocker le commentaire de doc si besoin ici
                         return self.next_token();
                     } else {
                         return Ok(self.single(Slash));

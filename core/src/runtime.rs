@@ -12,6 +12,7 @@ pub enum Value {
     Type(Type),
     Null,
     List(Vec<Value>),
+    Instance(Instance),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,12 @@ pub struct Type {
     pub name: String,
     pub fields: HashMap<String, Value>,
     pub methods: HashMap<String, Function>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instance {
+    pub typ: Type,
+    pub fields: HashMap<String, Value>,
 }
 
 #[derive(Clone)]
@@ -83,7 +90,15 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
-        Interpreter { env: Environment::new() }
+        let mut env = Environment::new();
+
+        // Ajoute la fonction native input()
+        env.set("input".to_string(), Value::Function(Function {
+            params: vec![],
+            body: vec![], // Le corps est vide, mais on va l'intercepter dans eval_expr
+        }));
+
+        Interpreter { env }
     }
 
     pub fn eval_block(&mut self, block: &[Stmt]) -> Result<Value, RuntimeError> {
@@ -175,6 +190,16 @@ impl Interpreter {
                 Ok(Value::Null)
             }
 
+            Stmt::PrintArgs(args) => {
+                let mut vals = Vec::new();
+                for e in args {
+                    let val = self.eval_expr(e)?;
+                    vals.push(value_to_string(&val));
+                }
+                println!("{}", vals.join(" "));
+                Ok(Value::Null)
+            }
+
             Stmt::Type { name, fields, methods } => {
                 let mut fields_map = HashMap::new();
                 for (field_name, expr) in fields {
@@ -246,6 +271,15 @@ impl Interpreter {
                     .collect::<Result<Vec<_>, _>>()?;
                 match callee {
                     Value::Function(func) => {
+                        // Si c'est la fonction input native :
+                        if func.params.is_empty() && func.body.is_empty() && function_is_input(function) {
+                            use std::io::{self, Write};
+                            print!(""); // force flush
+                            io::stdout().flush().ok();
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input).ok();
+                            return Ok(Value::String(input.trim_end().to_string()));
+                        }
                         if func.params.len() != args.len() {
                             return Err(RuntimeError::Message("Argument count mismatch".to_string()));
                         }
@@ -271,6 +305,30 @@ impl Interpreter {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Value::List(vals))
             }
+            Expr::Instance { type_name, fields } => {
+                let type_val = self.env.get(type_name)
+                    .ok_or_else(|| RuntimeError::Message(format!("Unknown type '{}'", type_name)))?;
+                if let Value::Type(typ) = type_val {
+                    let mut instance_fields = typ.fields.clone();
+                    for (k, v) in fields {
+                        instance_fields.insert(k.clone(), self.eval_expr(v)?);
+                    }
+                    Ok(Value::Instance(Instance { typ: typ.clone(), fields: instance_fields }))
+                } else {
+                    Err(RuntimeError::Message(format!("'{}' is not a type", type_name)))
+                }
+            }
+            Expr::FieldAccess { object, field } => {
+                let obj = self.eval_expr(object)?;
+                match obj {
+                    Value::Instance(inst) => {
+                        inst.fields.get(field)
+                            .cloned()
+                            .ok_or_else(|| RuntimeError::Message(format!("Unknown field '{}'", field)))
+                    }
+                    _ => Err(RuntimeError::Message("Not an instance".to_string())),
+                }
+            }
             _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", expr))),
         }
     }
@@ -285,6 +343,7 @@ fn is_truthy(val: &Value) -> bool {
         Value::Function(_) => true,
         Value::Type(_) => true,
         Value::List(vals) => !vals.is_empty(),
+        Value::Instance(_) => true,
     }
 }
 
@@ -347,6 +406,9 @@ fn eval_binary(op: BinOp, left: Value, right: Value) -> Result<Value, RuntimeErr
             (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a || b)),
             _ => Err(RuntimeError::Message("Invalid operands for '||'".to_string())),
         },
+        Pow => Ok(Value::Number(get_num(&left).powf(get_num(&right)))),
+        // Ajoute ceci pour couvrir tous les autres opérateurs non encore implémentés :
+        _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", op))),
     }
 }
 
@@ -370,5 +432,15 @@ fn value_to_string(val: &Value) -> String {
             let items: Vec<String> = vals.iter().map(|v| value_to_string(v)).collect();
             format!("[{}]", items.join(", "))
         }
+        Value::Instance(_) => "<instance>".to_string(),
+    }
+}
+
+// Helper pour détecter l'appel à input
+fn function_is_input(function: &Expr) -> bool {
+    if let Expr::Variable(name) = function {
+        name == "input"
+    } else {
+        false
     }
 }

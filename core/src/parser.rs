@@ -1,3 +1,5 @@
+// core/src/parser.rs
+
 // --- Dépendances et définitions de base ---
 use crate::ast::*;
 use crate::lexer::{Lexer, Token, TokenKind};
@@ -65,6 +67,30 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Génère une erreur UnexpectedToken avec contexte et exemple
+    fn unexpected(&self, context: &str, expected: &str) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind::UnexpectedToken,
+            message: format!(
+                "Erreur de syntaxe {} : attendu {}, trouvé {:?} à la ligne {}, colonne {}.",
+                context, expected, self.curr.kind, self.curr.line, self.curr.col
+            ),
+            line: self.curr.line,
+            col: self.curr.col,
+        }
+    }
+
+    /// Génère une erreur Custom avec message et contexte
+    #[allow(dead_code)]
+    fn custom_error(&self, context: &str, msg: &str) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind::Custom,
+            message: format!("{} : {} (ligne {}, colonne {})", context, msg, self.curr.line, self.curr.col),
+            line: self.curr.line,
+            col: self.curr.col,
+        }
+    }
+
     // =========================
     //   Entrée principale
     // =========================
@@ -85,8 +111,11 @@ impl<'a> Parser<'a> {
     /// Parse une instruction (statement)
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match &self.curr.kind {
+            TokenKind::Type => self.parse_type(),
             TokenKind::Let => self.parse_let(),
             TokenKind::Fn => self.parse_function(),
+            TokenKind::Const => self.parse_const(),                // Ajoute cette ligne
+            TokenKind::Native => self.parse_native_function(),     // Ajoute cette ligne
             TokenKind::Return => self.parse_return(),
             TokenKind::If => self.parse_if(),
             TokenKind::While => self.parse_while(),
@@ -96,6 +125,8 @@ impl<'a> Parser<'a> {
             TokenKind::Continue => self.parse_continue(),
             TokenKind::Print => self.parse_print(),
             TokenKind::LBrace => self.parse_block_stmt(),
+            TokenKind::Match => self.parse_match(),
+            TokenKind::Enum => self.parse_enum(),
             // Expression seule (ex: appel de fonction, affectation, etc.)
             _ => {
                 let expr = self.parse_expr()?;
@@ -113,12 +144,7 @@ impl<'a> Parser<'a> {
         let name = if let TokenKind::Identifier(name) = &self.curr.kind {
             name.clone()
         } else {
-            return Err(ParseError {
-                kind: ParseErrorKind::UnexpectedToken,
-                message: format!("Token inattendu : {:?}", self.curr),
-                line: self.curr.line,
-                col: self.curr.col,
-            });
+            return Err(self.unexpected("dans la déclaration de variable", "un identifiant"));
         };
         self.advance();
         self.expect(&TokenKind::Assign)?;
@@ -137,7 +163,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken,
-                message: format!("Token inattendu : {:?}", self.curr),
+                message: "Expected function name".to_string(),
                 line: self.curr.line,
                 col: self.curr.col,
             });
@@ -154,25 +180,37 @@ impl<'a> Parser<'a> {
                 if self.curr.kind == TokenKind::Comma {
                     self.advance();
                 } else if self.curr.kind != TokenKind::RParen {
-                    return Err(ParseError {
-                        kind: ParseErrorKind::UnexpectedToken,
-                        message: format!("Token inattendu : {:?}", self.curr),
-                        line: self.curr.line,
-                        col: self.curr.col,
-                    });
+                    return Err(self.unexpected("dans la liste des paramètres", "une virgule ou une parenthèse fermante"));
                 }
             } else {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken,
-                    message: format!("Token inattendu : {:?}", self.curr),
-                    line: self.curr.line,
-                    col: self.curr.col,
-                });
+                return Err(self.unexpected("dans la liste des paramètres", "un identifiant"));
             }
         }
         self.expect(&TokenKind::RParen)?;
 
-        let body = self.parse_block()?;
+        // Ici, accepte un ':' optionnel avant '{'
+        if self.curr.kind == TokenKind::Colon {
+            self.advance();
+        }
+        self.expect(&TokenKind::LBrace)?;
+
+        let start_line = self.curr.line;
+        let mut body = Vec::new();
+        while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
+            body.push(self.parse_stmt()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        let end_line = self.curr.line;
+
+        if end_line - start_line > 64 {
+            return Err(ParseError {
+                kind: ParseErrorKind::Custom,
+                message: format!("Function '{}' exceeds 64 lines ({} lines)", name, end_line - start_line),
+                line: start_line,
+                col: self.curr.col,
+            });
+        }
+
         Ok(Stmt::Function { name, params, body })
     }
 
@@ -275,11 +313,16 @@ impl<'a> Parser<'a> {
     /// print ...;
     fn parse_print(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::Print)?;
-        let expr = self.parse_expr()?;
+        let mut args = Vec::new();
+        args.push(self.parse_expr()?);
+        while self.curr.kind == TokenKind::Comma {
+            self.advance();
+            args.push(self.parse_expr()?);
+        }
         if self.curr.kind == TokenKind::Semicolon {
             self.advance();
         }
-        Ok(Stmt::Print(expr))
+        Ok(Stmt::PrintArgs(args))
     }
 
     /// { ... }
@@ -422,7 +465,7 @@ impl<'a> Parser<'a> {
 
     /// Multiplication/Division
     fn parse_factor(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_unary()?;
+        let mut expr = self.parse_power()?;
         while matches!(self.curr.kind, TokenKind::Star | TokenKind::Slash) {
             let op = match &self.curr.kind {
                 TokenKind::Star => BinOp::Mul,
@@ -430,10 +473,25 @@ impl<'a> Parser<'a> {
                 _ => unreachable!(),
             };
             self.advance();
-            let right = self.parse_unary()?;
+            let right = self.parse_power()?;
             expr = Expr::Binary {
                 left: Box::new(expr),
                 op,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    /// Puissance (^)
+    fn parse_power(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_unary()?;
+        while self.curr.kind == TokenKind::Pow {
+            self.advance();
+            let right = self.parse_unary()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op: BinOp::Pow,
                 right: Box::new(right),
             };
         }
@@ -480,6 +538,18 @@ impl<'a> Parser<'a> {
                     function: Box::new(expr),
                     arguments: args,
                 };
+            } else if self.curr.kind == TokenKind::Dot {
+                self.advance();
+                if let TokenKind::Identifier(field) = &self.curr.kind {
+                    let field_name = field.clone();
+                    self.advance();
+                    expr = Expr::FieldAccess {
+                        object: Box::new(expr),
+                        field: field_name,
+                    };
+                } else {
+                    // erreur
+                }
             } else {
                 break;
             }
@@ -511,31 +581,58 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier(name) => {
                 let var = name.clone();
                 self.advance();
-                Ok(Expr::Variable(var))
+                if self.curr.kind == TokenKind::LBrace {
+                    // Instanciation d'un type
+                    self.advance();
+                    let mut fields = Vec::new();
+                    while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
+                        if let TokenKind::Identifier(field_name) = &self.curr.kind {
+                            let field = field_name.clone();
+                            self.advance();
+                            self.expect(&TokenKind::Colon)?;
+                            let expr = self.parse_expr()?;
+                            if self.curr.kind == TokenKind::Comma {
+                                self.advance();
+                            }
+                            fields.push((field, expr));
+                        } else {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken,
+                                message: format!("Unexpected token in instance: {:?}", self.curr.kind),
+                                line: self.curr.line,
+                                col: self.curr.col,
+                            });
+                        }
+                    }
+                    self.expect(&TokenKind::RBrace)?;
+                    Ok(Expr::Instance { type_name: var, fields })
+                } else {
+                    Ok(Expr::Variable(var))
+                }
             }
-            TokenKind::LParen => {
-                self.advance();
-                let expr = self.parse_expr()?;
-                self.expect(&TokenKind::RParen)?;
-                Ok(expr)
-            }
-            TokenKind::LBrace => {
-                // Expression bloc : { ... }
-                Ok(Expr::Block(self.parse_block()?))
-            }
-            TokenKind::Fn => self.parse_lambda(), // Lambda anonyme
-            TokenKind::Error(msg) => Err(ParseError {
-                kind: ParseErrorKind::Custom,
-                message: format!("Lexical error: {}", msg),
-                line: self.curr.line,
-                col: self.curr.col,
-            }),
             TokenKind::LBracket => {
                 self.advance();
                 let mut elements = Vec::new();
                 if self.curr.kind != TokenKind::RBracket {
-                    loop {
+                    elements.push(self.parse_expr()?);
+                    while self.curr.kind == TokenKind::Comma {
+                        self.advance();
                         elements.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(Expr::List(elements))
+            }
+            TokenKind::LBrace => {
+                // Dictionnaire (clé: valeur, ...)
+                self.advance();
+                let mut entries = Vec::new();
+                if self.curr.kind != TokenKind::RBrace {
+                    loop {
+                        let key = self.parse_expr()?;
+                        self.expect(&TokenKind::Colon)?;
+                        let value = self.parse_expr()?;
+                        entries.push((key, value));
                         if self.curr.kind == TokenKind::Comma {
                             self.advance();
                         } else {
@@ -543,8 +640,66 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                self.expect(&TokenKind::RBracket)?;
-                Ok(Expr::List(elements))
+                self.expect(&TokenKind::RBrace)?;
+                Ok(Expr::Dict(entries))
+            }
+            TokenKind::LParen => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                if self.curr.kind == TokenKind::Comma {
+                    // Tuple
+                    let mut elements = vec![expr];
+                    while self.curr.kind == TokenKind::Comma {
+                        self.advance();
+                        elements.push(self.parse_expr()?);
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Expr::Tuple(elements))
+                } else {
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(expr)
+                }
+            }
+            TokenKind::Lambda => {
+                self.advance();
+                self.expect(&TokenKind::LParen)?;
+                let mut params = Vec::new();
+                while self.curr.kind != TokenKind::RParen {
+                    if let TokenKind::Identifier(param) = &self.curr.kind {
+                        params.push(param.clone());
+                        self.advance();
+                        if self.curr.kind == TokenKind::Comma {
+                            self.advance();
+                        } else if self.curr.kind != TokenKind::RParen {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken,
+                                message: format!("Token inattendu : {:?}", self.curr),
+                                line: self.curr.line,
+                                col: self.curr.col,
+                            });
+                        }
+                    } else {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken,
+                            message: format!("Token inattendu : {:?}", self.curr),
+                            line: self.curr.line,
+                            col: self.curr.col,
+                        });
+                    }
+                }
+                self.expect(&TokenKind::RParen)?;
+                let body = if self.curr.kind == TokenKind::LBrace {
+                    self.advance();
+                    let mut stmts = Vec::new();
+                    while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
+                        stmts.push(self.parse_stmt()?);
+                    }
+                    self.expect(&TokenKind::RBrace)?;
+                    Stmt::Block(stmts)
+                } else {
+                    self.parse_stmt()?
+                };
+                Ok(Expr::Lambda { params, body: vec![body] })
             }
             _ => Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken,
@@ -555,10 +710,85 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// fn(x, y) { ... }  (lambda anonyme)
-    fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
+    /// Parse un type : `type Nom { ... }`
+    fn parse_type(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Type)?;
+        let name = if let TokenKind::Identifier(name) = &self.curr.kind {
+            name.clone()
+        } else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: "Expected type name".to_string(),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
+        };
+        self.advance();
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
+            if self.curr.kind == TokenKind::Fn {
+                methods.push(self.parse_function()?);
+            } else if let TokenKind::Identifier(field_name) = &self.curr.kind {
+                let field = field_name.clone();
+                self.advance();
+                self.expect(&TokenKind::Colon)?;
+                let expr = self.parse_expr()?;
+                if self.curr.kind == TokenKind::Comma {
+                    self.advance();
+                }
+                fields.push((field, expr));
+            } else {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken,
+                    message: format!("Unexpected token in type body: {:?}", self.curr.kind),
+                    line: self.curr.line,
+                    col: self.curr.col,
+                });
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(Stmt::Type { name, fields, methods })
+    }
+
+    /// const x = ...;
+    fn parse_const(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Const)?;
+        let name = if let TokenKind::Identifier(name) = &self.curr.kind {
+            name.clone()
+        } else {
+            return Err(self.unexpected("dans la déclaration de constante", "un identifiant"));
+        };
+        self.advance();
+        self.expect(&TokenKind::Assign)?;
+        let expr = self.parse_expr()?;
+        if self.curr.kind == TokenKind::Semicolon {
+            self.advance();
+        }
+        Ok(Stmt::Const { name, expr })
+    }
+
+    /// native x = ...;
+    fn parse_native_function(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&TokenKind::Native)?;
         self.expect(&TokenKind::Fn)?;
+        let name = if let TokenKind::Identifier(name) = &self.curr.kind {
+            name.clone()
+        } else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken,
+                message: "Expected native function name".to_string(),
+                line: self.curr.line,
+                col: self.curr.col,
+            });
+        };
+        self.advance();
         self.expect(&TokenKind::LParen)?;
+
+        // Paramètres de la fonction native
         let mut params = Vec::new();
         while self.curr.kind != TokenKind::RParen {
             if let TokenKind::Identifier(param) = &self.curr.kind {
@@ -567,24 +797,57 @@ impl<'a> Parser<'a> {
                 if self.curr.kind == TokenKind::Comma {
                     self.advance();
                 } else if self.curr.kind != TokenKind::RParen {
-                    return Err(ParseError {
-                        kind: ParseErrorKind::UnexpectedToken,
-                        message: format!("Token inattendu : {:?}", self.curr),
-                        line: self.curr.line,
-                        col: self.curr.col,
-                    });
+                    return Err(self.unexpected("dans la liste des paramètres de la fonction native", "une virgule ou une parenthèse fermante"));
                 }
             } else {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken,
-                    message: format!("Token inattendu : {:?}", self.curr),
-                    line: self.curr.line,
-                    col: self.curr.col,
-                });
+                return Err(self.unexpected("dans la liste des paramètres de la fonction native", "un identifiant"));
             }
         }
         self.expect(&TokenKind::RParen)?;
-        let body = self.parse_block()?;
-        Ok(Expr::Lambda { params, body })
+
+        // Ici, accepte un ':' optionnel avant '{'
+        if self.curr.kind == TokenKind::Colon {
+            self.advance();
+        }
+        self.expect(&TokenKind::LBrace)?;
+
+        let start_line = self.curr.line;
+        let mut body = Vec::new();
+        while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
+            body.push(self.parse_stmt()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        let end_line = self.curr.line;
+
+        if end_line - start_line > 64 {
+            return Err(ParseError {
+                kind: ParseErrorKind::Custom,
+                message: format!("Native function '{}' exceeds 64 lines ({} lines)", name, end_line - start_line),
+                line: start_line,
+                col: self.curr.col,
+            });
+        }
+
+        Ok(Stmt::NativeFunction { name, params, body })
+    }
+
+    /// match ... { ... }
+    fn parse_match(&mut self) -> Result<Stmt, ParseError> {
+        Err(ParseError {
+            kind: ParseErrorKind::Custom,
+            message: "parse_match n'est pas encore implémenté".to_string(),
+            line: self.curr.line,
+            col: self.curr.col,
+        })
+    }
+
+    /// enum ... { ... }
+    fn parse_enum(&mut self) -> Result<Stmt, ParseError> {
+        Err(ParseError {
+            kind: ParseErrorKind::Custom,
+            message: "parse_enum n'est pas encore implémenté".to_string(),
+            line: self.curr.line,
+            col: self.curr.col,
+        })
     }
 }

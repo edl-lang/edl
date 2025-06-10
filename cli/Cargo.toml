@@ -7,3 +7,4 @@ edition = "2021"
 clap = { version = "4.1", features = ["derive"] }
 rustyline = "10.0"
 core = { path = "../core" }
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls"] }

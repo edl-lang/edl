@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/sh
 set -e
 
 # EDL CLI Install Script
@@ -30,7 +30,7 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     else
         SHELL_RC="$HOME/.bashrc"
     fi
-    echo -e "\n# Add EDL to PATH" >> "$SHELL_RC"
+    echo "\n# Add EDL to PATH" >> "$SHELL_RC"
     echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
     echo "Added $INSTALL_DIR to PATH in $SHELL_RC. Restart your shell or run: export PATH=\"$INSTALL_DIR:\$PATH\""
 fi
