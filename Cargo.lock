@@ -181,6 +181,7 @@ dependencies = [
  "core",
  "reqwest",
  "rustyline",
+ "serde_json",
 ]
 
 [[package]]

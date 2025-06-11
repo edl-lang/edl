@@ -20,6 +20,10 @@ pub enum Expr {
     Invalid(String),                    // Invalid expression (for error recovery)
     FieldAccess { object: Box<Expr>, field: String },       // Field access
     Instance { type_name: String, fields: Vec<(String, Expr)> }, // Ajoute ceci
+    Index {
+        collection: Box<Expr>,
+        index: Box<Expr>,
+    }, // Ajoute l'opérateur d'indexation pour les listes/dicts
 }
 
 /// Instructions/statements du langage EDL

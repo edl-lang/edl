@@ -5,7 +5,7 @@ use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use std::io::Write;
 use core::{parser::Parser as EdlParser, runtime::Interpreter};
-use serde_json::{Value, Map};
+use serde_json::{Value, json}; // <-- tout ce qu'il te faut pour le JSON
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -33,7 +33,7 @@ enum Command {
 fn main() {
     let cli = Cli::parse();
     match cli.cmd {
-        Command::Run { file } => run_file(&file),
+        Command::Run { file } => run_script(&file),
         Command::Repl => start_repl(),
         Command::Install { package } => install_package(&package),
         Command::Update { package } => update_package(&package),
@@ -167,12 +167,12 @@ fn install_package(package: &str) {
                 };
 
                 // Ajoute la dépendance
+                if !manifest.get("dependencies").is_some() {
+                    manifest["dependencies"] = json!({});
+                }
                 let deps = manifest.get_mut("dependencies")
                     .and_then(|d| d.as_object_mut())
-                    .unwrap_or_else(|| {
-                        manifest["dependencies"] = json!({});
-                        manifest.get_mut("dependencies").unwrap().as_object_mut().unwrap()
-                    });
+                    .expect("dependencies should be an object");
                 deps.insert(package.to_string(), Value::String("latest".to_string()));
 
                 // Réécrit le fichier
@@ -273,4 +273,39 @@ fn init_project() {
     }
 
     println!("✨ EDL project initialized!");
+}
+
+fn run_script(script: &str) {
+    // 1. Si l'argument finit déjà par ".edl", ne pas rajouter l'extension
+    let file = if script.ends_with(".edl") {
+        script.to_string()
+    } else {
+        format!("{}.edl", script)
+    };
+    if std::path::Path::new(&file).exists() {
+        run_file(&file);
+        return;
+    }
+
+    // 2. Sinon, cherche dans package.edl.json > scripts
+    let manifest_path = "package.edl.json";
+    if let Ok(data) = fs::read_to_string(manifest_path) {
+        if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&data) {
+            if let Some(scripts) = manifest.get("scripts").and_then(|s| s.as_object()) {
+                if let Some(cmd) = scripts.get(script).and_then(|v| v.as_str()) {
+                    println!("▶️  Running script '{}' from package.edl.json: {}", script, cmd);
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .status()
+                        .expect("Failed to run script");
+                    return;
+                }
+            }
+        }
+    }
+
+    // 3. Sinon, erreur
+    eprintln!("❌ Script '{}' not found as a .edl file or in package.edl.json", script);
+    std::process::exit(1);
 }

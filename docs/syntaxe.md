@@ -59,7 +59,7 @@ print(resultat); // Affiche 25
 
 ---
 
-## 5. Les conditions : if / else
+## 5. Les conditions : if / else if / else
 
 Pour exécuter du code selon une condition :
 
@@ -68,12 +68,16 @@ print("What is your age?:");
 let age = input();
 let age = to_number(age);
 
-if age < 18 {
-    print("You are a minor.");
+if age < 13 {
+    print("You are a child.");
+} else if age < 18 {
+    print("You are a teenager.");
 } else {
     print("You are an adult.");
 }
 ```
+- Tu peux chaîner autant de `else if` que tu veux.
+- Les blocs sont toujours délimités par `{ ... }`.
 
 ---
 
@@ -111,6 +115,14 @@ let vide = [];
 print(vide); // Affiche []
 ```
 
+Accès et modification :
+
+```edl
+print(nombres[0]); // 1
+nombres[1] = 42;
+print(nombres); // [1, 42, 3]
+```
+
 ---
 
 ## 8. Fonctions anonymes (lambdas)
@@ -124,9 +136,9 @@ print(double(4)); // Affiche 8
 
 ---
 
-## 9. Définir ses propres types (structs)
+## 9. Définir ses propres types (structs/classes)
 
-EDL permet de créer des types personnalisés :
+EDL permet de créer des types personnalisés, similaires à des **classes** ou des **structs** dans d’autres langages, grâce au mot-clé `type` :
 
 ```edl
 type Point {
@@ -141,6 +153,10 @@ let p = Point { x: 3, y: 4 };
 print(p.x);      // 3
 print(p.norm()); // 5
 ```
+
+- Le mot-clé `type` permet de déclarer une **classe** avec des champs et des méthodes.
+- Les méthodes sont définies à l’intérieur du bloc, avec `fn nom(self, ...)`.
+- L’instanciation se fait avec `Type { champ: valeur, ... }`.
 
 ---
 

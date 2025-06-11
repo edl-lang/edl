@@ -147,6 +147,11 @@ impl<'a> Parser<'a> {
             return Err(self.unexpected("dans la déclaration de variable", "un identifiant"));
         };
         self.advance();
+        // Ici, il ne faut PAS exiger un TokenKind::Colon
+        if self.curr.kind == TokenKind::Colon {
+            self.advance();
+            // ...parse type annotation...
+        }
         self.expect(&TokenKind::Assign)?;
         let expr = self.parse_expr()?;
         if self.curr.kind == TokenKind::Semicolon {
@@ -228,14 +233,20 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Return(expr))
     }
 
-    /// if ... { ... } [else { ... }]
+    /// if ... { ... } [else if ... { ... }] [else { ... }]
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&TokenKind::If)?;
         let condition = self.parse_expr()?;
         let then_branch = self.parse_block()?;
         let else_branch = if self.curr.kind == TokenKind::Else {
             self.advance();
-            Some(self.parse_block()?)
+            if self.curr.kind == TokenKind::If {
+                // else if ... => parse un autre if récursivement
+                Some(vec![self.parse_if()?])
+            } else {
+                // else { ... }
+                Some(self.parse_block()?)
+            }
         } else {
             None
         };
@@ -550,6 +561,14 @@ impl<'a> Parser<'a> {
                 } else {
                     // erreur
                 }
+            } else if self.curr.kind == TokenKind::LBracket {
+                self.advance();
+                let index = self.parse_expr()?;
+                self.expect(&TokenKind::RBracket)?;
+                expr = Expr::Index {
+                    collection: Box::new(expr),
+                    index: Box::new(index),
+                };
             } else {
                 break;
             }
@@ -581,34 +600,9 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier(name) => {
                 let var = name.clone();
                 self.advance();
-                if self.curr.kind == TokenKind::LBrace {
-                    // Instanciation d'un type
-                    self.advance();
-                    let mut fields = Vec::new();
-                    while self.curr.kind != TokenKind::RBrace && self.curr.kind != TokenKind::Eof {
-                        if let TokenKind::Identifier(field_name) = &self.curr.kind {
-                            let field = field_name.clone();
-                            self.advance();
-                            self.expect(&TokenKind::Colon)?;
-                            let expr = self.parse_expr()?;
-                            if self.curr.kind == TokenKind::Comma {
-                                self.advance();
-                            }
-                            fields.push((field, expr));
-                        } else {
-                            return Err(ParseError {
-                                kind: ParseErrorKind::UnexpectedToken,
-                                message: format!("Unexpected token in instance: {:?}", self.curr.kind),
-                                line: self.curr.line,
-                                col: self.curr.col,
-                            });
-                        }
-                    }
-                    self.expect(&TokenKind::RBrace)?;
-                    Ok(Expr::Instance { type_name: var, fields })
-                } else {
-                    Ok(Expr::Variable(var))
-                }
+                // NE PAS traiter ici l'appel de fonction ou l'indexation
+                // Juste retourner la variable, le chainage (appel, index, etc.) sera géré dans parse_call
+                Ok(Expr::Variable(var))
             }
             TokenKind::LBracket => {
                 self.advance();
