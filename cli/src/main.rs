@@ -5,6 +5,7 @@ use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use std::io::Write;
 use core::{parser::Parser as EdlParser, runtime::Interpreter};
+use serde_json::{Value, Map};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -25,6 +26,8 @@ enum Command {
     Update { package: String },
     /// List installed EDL packages
     List,
+    /// Initialize a new EDL project
+    Init,
 }
 
 fn main() {
@@ -35,6 +38,7 @@ fn main() {
         Command::Install { package } => install_package(&package),
         Command::Update { package } => update_package(&package),
         Command::List => list_packages(),
+        Command::Init => init_project(), // Ajoute cette ligne
     }
 }
 
@@ -139,7 +143,7 @@ fn start_repl() {
 
 // Ajoute des fonctions basiques pour l'instant
 fn install_package(package: &str) {
-    let url = format!("https://packages.quantum-os/edl/{}/latest", package);
+    let url = format!("https://packages.quantum-os.org/edl/{}/latest", package);
     println!("📦 Downloading package from {url}");
 
     // Utilise reqwest pour télécharger le module (ajoute reqwest à Cargo.toml)
@@ -153,6 +157,28 @@ fn install_package(package: &str) {
                 let mut file = fs::File::create(&path).expect("Failed to create module file");
                 file.write_all(code.as_bytes()).expect("Failed to write module");
                 println!("✅ Installed '{}'", package);
+
+                // --- Ajout dans package.edl.json ---
+                let manifest_path = "package.edl.json";
+                let mut manifest: Value = if let Ok(data) = fs::read_to_string(manifest_path) {
+                    serde_json::from_str(&data).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({})
+                };
+
+                // Ajoute la dépendance
+                let deps = manifest.get_mut("dependencies")
+                    .and_then(|d| d.as_object_mut())
+                    .unwrap_or_else(|| {
+                        manifest["dependencies"] = json!({});
+                        manifest.get_mut("dependencies").unwrap().as_object_mut().unwrap()
+                    });
+                deps.insert(package.to_string(), Value::String("latest".to_string()));
+
+                // Réécrit le fichier
+                let manifest_str = serde_json::to_string_pretty(&manifest).unwrap();
+                fs::write(manifest_path, manifest_str).expect("Failed to update package.edl.json");
+                println!("🔗 Added '{}' to dependencies in package.edl.json", package);
             } else {
                 eprintln!("❌ Package not found: {}", package);
             }
@@ -161,12 +187,90 @@ fn install_package(package: &str) {
     }
 }
 
+#[warn(unused_variables)]
 fn update_package(package: &str) {
-    println!("⬆️  Updating package '{}'", package);
-    // Ici tu pourrais mettre à jour le package
+    let url = format!("https://packages.quantum-os.org/edl/update/{}/latest", package);
+    println!("⬆️  Updating package '{}' from {url}", package);
+
+    match reqwest::blocking::get(&url) {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                let code = resp.text().unwrap_or_default();
+                let dir = "edl_modules";
+                fs::create_dir_all(dir).ok();
+                let path = format!("{}/{}.edl", dir, package);
+                let mut file = fs::File::create(&path).expect("Failed to create module file");
+                file.write_all(code.as_bytes()).expect("Failed to write module");
+                println!("✅ Updated '{}'", package);
+            } else {
+                eprintln!("❌ Package not found or no update available: {}", package);
+            }
+        }
+        Err(e) => eprintln!("❌ Network error: {}", e),
+    }
 }
 
 fn list_packages() {
+    use std::fs;
+
+    let dir = "edl_modules";
     println!("📚 Installed packages:");
-    // Ici tu pourrais lister les packages installés
+    match fs::read_dir(dir) {
+        Ok(entries) => {
+            let mut found = false;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "edl" {
+                        if let Some(name) = path.file_stem() {
+                            println!(" - {}", name.to_string_lossy());
+                            found = true;
+                        }
+                    }
+                }
+            }
+            if !found {
+                println!("(No packages installed)");
+            }
+        }
+        Err(_) => {
+            println!("(No packages installed)");
+        }
+    }
+}
+
+fn init_project() {
+    use std::fs;
+    use std::io::Write;
+
+    // Crée package.edl.json au format JSON si absent
+    if !std::path::Path::new("package.edl.json").exists() {
+        let mut file = fs::File::create("package.edl.json").expect("Failed to create package.edl.json");
+        let content = r#"{
+    "name": "my-edl-project",
+    "version": "0.1.0",
+    "authors": ["Your Name"],
+    "description": "A new EDL project",
+    "scripts": {
+        "build": "edl build",
+        "test": "edl test"
+    },
+    "dependencies": {}
+}
+"#;
+        file.write_all(content.as_bytes()).expect("Failed to write package.edl.json");
+        println!("✅ Created package.edl.json");
+    } else {
+        println!("package.edl.json already exists.");
+    }
+
+    // Crée le dossier edl_modules si absent
+    if !std::path::Path::new("edl_modules").exists() {
+        fs::create_dir("edl_modules").expect("Failed to create edl_modules directory");
+        println!("✅ Created edl_modules/");
+    } else {
+        println!("edl_modules/ already exists.");
+    }
+
+    println!("✨ EDL project initialized!");
 }
