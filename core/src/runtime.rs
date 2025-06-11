@@ -98,6 +98,12 @@ impl Interpreter {
             body: vec![], // Le corps est vide, mais on va l'intercepter dans eval_expr
         }));
 
+        // Ajoute la fonction to_number()
+        env.set("to_number".to_string(), Value::Function(Function {
+            params: vec!["x".to_string()],
+            body: vec![], // Intercepte dans eval_expr
+        }));
+
         Interpreter { env }
     }
 
@@ -280,6 +286,18 @@ impl Interpreter {
                             io::stdin().read_line(&mut input).ok();
                             return Ok(Value::String(input.trim_end().to_string()));
                         }
+                        // Ajoute ce bloc pour intercepter to_number
+                        if func.params.len() == 1 && func.body.is_empty() && function_is_to_number(function) {
+                            if let Some(Value::String(s)) = args.get(0) {
+                                if let Ok(n) = s.parse::<f64>() {
+                                    return Ok(Value::Number(n));
+                                } else {
+                                    return Err(RuntimeError::Message("Invalid number".to_string()));
+                                }
+                            } else {
+                                return Err(RuntimeError::Message("to_number expects a string".to_string()));
+                            }
+                        }
                         if func.params.len() != args.len() {
                             return Err(RuntimeError::Message("Argument count mismatch".to_string()));
                         }
@@ -440,6 +458,16 @@ fn value_to_string(val: &Value) -> String {
 fn function_is_input(function: &Expr) -> bool {
     if let Expr::Variable(name) = function {
         name == "input"
+    } else {
+        false
+    }
+}
+
+// Helper pour détecter l'appel à to_number
+#[warn(dead_code)]
+fn function_is_to_number(function: &Expr) -> bool {
+    if let Expr::Variable(name) = function {
+        name == "to_number"
     } else {
         false
     }

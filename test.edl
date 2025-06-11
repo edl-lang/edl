@@ -1,8 +1,8 @@
 print("What is your age?:");
 let age = input();
-// let age = to_number(age);
+let age = to_number(age);
 
-if age > 18 {
+if age < 18 {
     print("You are a minor.");
 } else {
     print("You are an adult.");
