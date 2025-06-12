@@ -165,7 +165,7 @@ print(p.norm()); // 5
 Pour réutiliser du code d’un autre fichier :
 
 ```edl
-import "mon_module.edl";
+import "mon_module.edl" from "parameter"; // Ajout de paramètre supplémentaire si besoin
 ```
 
 ---
