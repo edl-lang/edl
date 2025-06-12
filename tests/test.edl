@@ -34,7 +34,7 @@ fn remove_task() {
     print("Numéro de la tâche à supprimer :");
     let n = to_number(input()) - 1;
     if n >= 0 && n < length(tasks) {
-        tasks = tasks.remove(n); // <-- MAJ de la variable globale
+        tasks = tasks.remove(n);
         print("Tâche supprimée !");
     } else {
         print("Numéro invalide.");
