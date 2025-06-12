@@ -3,24 +3,27 @@
 use crate::ast::{BinOp, UnOp, Expr, Stmt};
 use std::collections::HashMap;
 
+/// Valeurs manipulées à l'exécution dans EDL
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     Bool(bool),
     String(String),
-    Function(Function),
-    Type(Type),
+    Function(Function),   // Fonction utilisateur ou native
+    Type(Type),           // Définition d'un type (struct/classe)
     Null,
     List(Vec<Value>),
-    Instance(Instance),
+    Instance(Instance),   // Instance d'un type
 }
 
+/// Représente une fonction utilisateur EDL
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
 }
 
+/// Représente un type utilisateur (struct/classe)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type {
     pub name: String,
@@ -28,12 +31,14 @@ pub struct Type {
     pub methods: HashMap<String, Function>,
 }
 
+/// Représente une instance d'un type utilisateur
 #[derive(Debug, Clone, PartialEq)]
 pub struct Instance {
     pub typ: Type,
     pub fields: HashMap<String, Value>,
 }
 
+/// Environnement d'exécution (scope de variables)
 #[derive(Clone)]
 pub struct Environment {
     pub vars: HashMap<String, Value>,
@@ -41,10 +46,12 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Crée un nouvel environnement racine
     pub fn new() -> Self {
         Environment { vars: HashMap::new(), parent: None }
     }
 
+    /// Crée un environnement enfant (pour les blocs, fonctions, etc.)
     pub fn with_parent(parent: &Environment) -> Self {
         Environment {
             vars: HashMap::new(),
@@ -52,6 +59,7 @@ impl Environment {
         }
     }
 
+    /// Recherche une variable dans l'environnement (récursif)
     pub fn get(&self, key: &str) -> Option<Value> {
         if let Some(val) = self.vars.get(key) {
             Some(val.clone())
@@ -62,10 +70,12 @@ impl Environment {
         }
     }
 
+    /// Définit une variable dans l'environnement courant
     pub fn set(&mut self, key: String, val: Value) {
         self.vars.insert(key, val);
     }
 
+    /// Affecte une variable (dans l'environnement courant ou parent)
     pub fn assign(&mut self, key: &str, val: Value) -> bool {
         if self.vars.contains_key(key) {
             self.vars.insert(key.to_string(), val);
@@ -78,17 +88,20 @@ impl Environment {
     }
 }
 
+/// Erreurs d'exécution (runtime)
 #[derive(Debug)]
 pub enum RuntimeError {
     Message(String),
     Return(Value),
 }
 
+/// Interpréteur principal EDL
 pub struct Interpreter {
     pub env: Environment,
 }
 
 impl Interpreter {
+    /// Crée un nouvel interpréteur avec les fonctions natives de base
     pub fn new() -> Self {
         let mut env = Environment::new();
 
@@ -104,23 +117,37 @@ impl Interpreter {
             body: vec![], // Intercepte dans eval_expr
         }));
 
+        // Ajoute la fonction length()
+        env.set("length".to_string(), Value::Function(Function {
+            params: vec!["list".to_string()],
+            body: vec![],
+        }));
+
+        // Ajoute la fonction push()
+        env.set("push".to_string(), Value::Function(Function {
+            params: vec!["list".to_string(), "item".to_string()],
+            body: vec![],
+        }));
+
+        // Ajoute la fonction remove()
+        env.set("remove".to_string(), Value::Function(Function {
+            params: vec!["list".to_string(), "index".to_string()],
+            body: vec![],
+        }));
+
         Interpreter { env }
     }
 
+    /// N'utilise pas de nouvel environnement pour le bloc principal
     pub fn eval_block(&mut self, block: &[Stmt]) -> Result<Value, RuntimeError> {
-        let previous_env = self.env.clone();
-        self.env = Environment::with_parent(&previous_env);
-        let result = (|| {
-            let mut last = Value::Null;
-            for stmt in block {
-                last = self.eval_stmt(stmt)?;
-            }
-            Ok(last)
-        })();
-        self.env = previous_env;
-        result
+        let mut last = Value::Null;
+        for stmt in block {
+            last = self.eval_stmt(stmt)?;
+        }
+        Ok(last)
     }
 
+    /// Évalue une instruction (statement)
     pub fn eval_stmt(&mut self, stmt: &Stmt) -> Result<Value, RuntimeError> {
         match stmt {
             Stmt::Expr(expr) => self.eval_expr(expr),
@@ -162,10 +189,7 @@ impl Interpreter {
 
             Stmt::While { condition, body } => {
                 while is_truthy(&self.eval_expr(condition)?) {
-                    let previous_env = self.env.clone();
-                    self.env = Environment::with_parent(&previous_env);
                     let _ = self.eval_block(body)?;
-                    self.env = previous_env;
                 }
                 Ok(Value::Null)
             }
@@ -174,16 +198,13 @@ impl Interpreter {
                 let start = get_num(&self.eval_expr(start)?) as i64;
                 let end = get_num(&self.eval_expr(end)?) as i64;
                 for i in start..end {
-                    let previous_env = self.env.clone();
-                    self.env = Environment::with_parent(&previous_env);
                     self.env.set(var.clone(), Value::Number(i as f64));
                     let _ = self.eval_block(body)?;
-                    self.env = previous_env;
                 }
                 Ok(Value::Null)
             }
 
-            Stmt::Import(_) => Ok(Value::Null),
+            Stmt::Import(_) => Ok(Value::Null), // À implémenter
 
             Stmt::Block(stmts) => self.eval_block(stmts),
 
@@ -207,6 +228,7 @@ impl Interpreter {
             }
 
             Stmt::Type { name, fields, methods } => {
+                // Déclaration d'un type utilisateur
                 let mut fields_map = HashMap::new();
                 for (field_name, expr) in fields {
                     let val = self.eval_expr(expr)?;
@@ -238,6 +260,7 @@ impl Interpreter {
         }
     }
 
+    /// Évalue une expression (Expr)
     pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
             Expr::Number(n) => Ok(Value::Number(*n)),
@@ -277,17 +300,15 @@ impl Interpreter {
                     .collect::<Result<Vec<_>, _>>()?;
                 match callee {
                     Value::Function(func) => {
-                        // Si c'est la fonction input native :
+                        // Fonctions natives
                         if func.params.is_empty() && func.body.is_empty() && function_is_input(function) {
-                            use std::io::{self, Write};
-                            print!(""); // force flush
-                            io::stdout().flush().ok();
-                            let mut input = String::new();
-                            io::stdin().read_line(&mut input).ok();
-                            return Ok(Value::String(input.trim_end().to_string()));
+                            use std::io::{stdin, stdout, Write};
+                            let mut s = String::new();
+                            stdout().flush().unwrap();
+                            stdin().read_line(&mut s).unwrap();
+                            return Ok(Value::String(s.trim().to_string()));
                         }
-                        // Ajoute ce bloc pour intercepter to_number
-                        if func.params.len() == 1 && func.body.is_empty() && function_is_to_number(function) {
+                        if func.params == vec!["x".to_string()] && func.body.is_empty() && function_is_to_number(function) {
                             if let Some(Value::String(s)) = args.get(0) {
                                 if let Ok(n) = s.parse::<f64>() {
                                     return Ok(Value::Number(n));
@@ -298,6 +319,33 @@ impl Interpreter {
                                 return Err(RuntimeError::Message("to_number expects a string".to_string()));
                             }
                         }
+                        if func.params == vec!["list".to_string()] && func.body.is_empty() && function_is_length(function) {
+                            if let Some(Value::List(list)) = args.get(0) {
+                                return Ok(Value::Number(list.len() as f64));
+                            } else {
+                                return Err(RuntimeError::Message("length expects a list".to_string()));
+                            }
+                        }
+                        if func.params == vec!["list".to_string(), "item".to_string()] && func.body.is_empty() && function_is_push(function) {
+                            if let (Some(Value::List(mut list)), Some(item)) = (args.get(0).cloned(), args.get(1).cloned()) {
+                                list.push(item);
+                                return Ok(Value::List(list));
+                            }
+                            return Err(RuntimeError::Message("push expects a list and an item".to_string()));
+                        }
+                        if func.params == vec!["list".to_string(), "index".to_string()] && func.body.is_empty() && function_is_remove(function) {
+                            if let (Some(Value::List(mut list)), Some(Value::Number(idx))) = (args.get(0).cloned(), args.get(1).cloned()) {
+                                let i = idx as usize;
+                                if i < list.len() {
+                                    list.remove(i);
+                                    return Ok(Value::List(list));
+                                } else {
+                                    return Err(RuntimeError::Message("remove: index out of bounds".to_string()));
+                                }
+                            }
+                            return Err(RuntimeError::Message("remove expects a list and an index".to_string()));
+                        }
+                        // Appel de fonction utilisateur ou méthode liée à une instance
                         if func.params.len() != args.len() {
                             return Err(RuntimeError::Message("Argument count mismatch".to_string()));
                         }
@@ -324,6 +372,7 @@ impl Interpreter {
                 Ok(Value::List(vals))
             }
             Expr::Instance { type_name, fields } => {
+                // Création d'une instance de type utilisateur
                 let type_val = self.env.get(type_name)
                     .ok_or_else(|| RuntimeError::Message(format!("Unknown type '{}'", type_name)))?;
                 if let Value::Type(typ) = type_val {
@@ -340,10 +389,40 @@ impl Interpreter {
                 let obj = self.eval_expr(object)?;
                 match obj {
                     Value::Instance(inst) => {
-                        inst.fields.get(field)
-                            .cloned()
-                            .ok_or_else(|| RuntimeError::Message(format!("Unknown field '{}'", field)))
+                        // Méthodes utilisateur
+                        if let Some(func) = inst.typ.methods.get(field) {
+                            // On "bind" self comme premier paramètre
+                            let mut bound_func = func.clone();
+                            bound_func.params.insert(0, "self".to_string());
+                            Ok(Value::Function(bound_func))
+                        } else if let Some(val) = inst.fields.get(field) {
+                            Ok(val.clone())
+                        } else {
+                            Err(RuntimeError::Message(format!("Unknown field or method '{}'", field)))
+                        }
                     }
+                    Value::List(list) => match field.as_str() {
+                        "push" => {
+                            Ok(Value::Function(Function {
+                                params: vec!["item".to_string()],
+                                body: vec![], // Intercepté dans eval_expr
+                            }))
+                        }
+                        "remove" => {
+                            Ok(Value::Function(Function {
+                                params: vec!["index".to_string()],
+                                body: vec![],
+                            }))
+                        }
+                        "length" | "len" => Ok(Value::Number(list.len() as f64)),
+                        _ => Err(RuntimeError::Message(format!("Unknown list method '{}'", field))),
+                    },
+                    Value::String(s) => match field.as_str() {
+                        "len" | "length" => Ok(Value::Number(s.len() as f64)),
+                        "to_upper" => Ok(Value::String(s.to_uppercase())),
+                        "to_lower" => Ok(Value::String(s.to_lowercase())),
+                        _ => Err(RuntimeError::Message(format!("Unknown string method '{}'", field))),
+                    },
                     _ => Err(RuntimeError::Message("Not an instance".to_string())),
                 }
             }
@@ -352,6 +431,7 @@ impl Interpreter {
     }
 }
 
+/// Détermine si une valeur est "vraie" (pour les conditions)
 fn is_truthy(val: &Value) -> bool {
     match val {
         Value::Bool(b) => *b,
@@ -365,6 +445,7 @@ fn is_truthy(val: &Value) -> bool {
     }
 }
 
+/// Extrait un nombre d'une Value (ou 0.0 sinon)
 fn get_num(val: &Value) -> f64 {
     match val {
         Value::Number(n) => *n,
@@ -372,6 +453,7 @@ fn get_num(val: &Value) -> f64 {
     }
 }
 
+/// Évalue une opération binaire
 fn eval_binary(op: BinOp, left: Value, right: Value) -> Result<Value, RuntimeError> {
     use BinOp::*;
     match op {
@@ -418,18 +500,19 @@ fn eval_binary(op: BinOp, left: Value, right: Value) -> Result<Value, RuntimeErr
         },
         And => match (left, right) {
             (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a && b)),
-            _ => Err(RuntimeError::Message("Invalid operands for '&&'".to_string())),
+            _ => Err(RuntimeError::Message("Invalid operands for 'and'".to_string())),
         },
         Or => match (left, right) {
             (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a || b)),
-            _ => Err(RuntimeError::Message("Invalid operands for '||'".to_string())),
+            _ => Err(RuntimeError::Message("Invalid operands for 'or'".to_string())),
         },
         Pow => Ok(Value::Number(get_num(&left).powf(get_num(&right)))),
-        // Ajoute ceci pour couvrir tous les autres opérateurs non encore implémentés :
+        // Pour les autres opérateurs non encore implémentés
         _ => Err(RuntimeError::Message(format!("Not yet implemented: {:?}", op))),
     }
 }
 
+/// Évalue le corps d'une fonction utilisateur
 fn eval_body(body: &[Stmt], interpreter: &mut Interpreter) -> Result<Value, RuntimeError> {
     let mut last = Value::Null;
     for stmt in body {
@@ -438,6 +521,7 @@ fn eval_body(body: &[Stmt], interpreter: &mut Interpreter) -> Result<Value, Runt
     Ok(last)
 }
 
+/// Convertit une Value en String pour l'affichage
 fn value_to_string(val: &Value) -> String {
     match val {
         Value::Number(n) => n.to_string(),
@@ -454,7 +538,8 @@ fn value_to_string(val: &Value) -> String {
     }
 }
 
-// Helper pour détecter l'appel à input
+/// Helper pour détecter l'appel à input()
+#[allow(dead_code)]
 fn function_is_input(function: &Expr) -> bool {
     if let Expr::Variable(name) = function {
         name == "input"
@@ -463,11 +548,40 @@ fn function_is_input(function: &Expr) -> bool {
     }
 }
 
-// Helper pour détecter l'appel à to_number
-#[warn(dead_code)]
+/// Helper pour détecter l'appel à to_number()
+#[allow(dead_code)]
 fn function_is_to_number(function: &Expr) -> bool {
     if let Expr::Variable(name) = function {
         name == "to_number"
+    } else {
+        false
+    }
+}
+
+/// Helper pour détecter l'appel à length()
+#[allow(dead_code)]
+fn function_is_length(function: &Expr) -> bool {
+    if let Expr::Variable(name) = function {
+        name == "length"
+    } else {
+        false
+    }
+}
+
+/// Helper pour détecter l'appel à push()
+#[allow(dead_code)]
+fn function_is_push(function: &Expr) -> bool {
+    if let Expr::Variable(name) = function {
+        name == "push"
+    } else {
+        false
+    }
+}
+
+#[allow(dead_code)]
+fn function_is_remove(function: &Expr) -> bool {
+    if let Expr::Variable(name) = function {
+        name == "remove"
     } else {
         false
     }

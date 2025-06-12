@@ -6,22 +6,24 @@ fn show_menu() {
     print("2. Lister les tâches");
     print("3. Supprimer une tâche");
     print("4. Quitter");
+    print("==============================");
+    print("-> entrer le numéro : ");
 }
 
 fn add_task() {
     print("Entrez la nouvelle tâche :");
     let t = input();
-    tasks.push(t);
+    tasks = tasks.push(t);
     print("Tâche ajoutée !");
 }
 
 fn list_tasks() {
-    if tasks.length() == 0 {
+    if length(tasks) == 0 {
         print("Aucune tâche.");
     } else {
         print("Vos tâches :");
         let i = 0;
-        while i < tasks.length() {
+        while i < length(tasks) {
             print(i + 1 + ". " + tasks[i]);
             i = i + 1;
         }
@@ -31,8 +33,8 @@ fn list_tasks() {
 fn remove_task() {
     print("Numéro de la tâche à supprimer :");
     let n = to_number(input()) - 1;
-    if n >= 0 && n < tasks.length() {
-        tasks.remove(n);
+    if n >= 0 && n < length(tasks) {
+        tasks = tasks.remove(n); // <-- MAJ de la variable globale
         print("Tâche supprimée !");
     } else {
         print("Numéro invalide.");
