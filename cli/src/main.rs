@@ -4,8 +4,20 @@ use clap::{Parser, Subcommand};
 use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use std::io::Write;
+
+// Ajouts indispensables pour résoudre les erreurs avec tower_lsp::async_trait
+use std::pin;
+use std::future;
+use std::marker;
+use std::option::Option;
+
 use core::{parser::Parser as EdlParser, runtime::Interpreter};
-use serde_json::{Value, json}; // <-- tout ce qu'il te faut pour le JSON
+use serde_json::{Value, json};
+
+use tower_lsp::{LspService, Server};
+use tower_lsp::jsonrpc::Result as LspResult;
+use tower_lsp::lsp_types::*;
+use tower_lsp::Client;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -28,9 +40,12 @@ enum Command {
     List,
     /// Initialize a new EDL project
     Init,
+    /// Start the EDL Language Server (LSP)
+    Lsp,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Run { file } => run_script(&file),
@@ -38,7 +53,8 @@ fn main() {
         Command::Install { package } => install_package(&package),
         Command::Update { package } => update_package(&package),
         Command::List => list_packages(),
-        Command::Init => init_project(), // Ajoute cette ligne
+        Command::Init => init_project(),
+        Command::Lsp => start_lsp().await,
     }
 }
 
@@ -64,9 +80,7 @@ fn run_file(file: &str) {
 
     for stmt in stmts {
         match interp.eval_stmt(&stmt) {
-            Ok(_val) => {
-                // Ne rien afficher ici : print() est déjà géré dans le runtime
-            }
+            Ok(_val) => {}
             Err(e) => {
                 eprintln!("❌ Runtime error: {:?}", e);
                 std::process::exit(1);
@@ -107,8 +121,7 @@ fn start_repl() {
                             for stmt in stmts {
                                 match interp.eval_stmt(&stmt) {
                                     Ok(val) => {
-                                        if let core::runtime::Value::Null = val {
-                                            // don't print Null
+                                        if let edl_core::runtime::Value::Null = val {
                                         } else {
                                             println!("{:?}", val);
                                         }
@@ -141,12 +154,12 @@ fn start_repl() {
     rl.append_history("~/.edl_history").ok();
 }
 
-// Ajoute des fonctions basiques pour l'instant
+// --- Gestion des paquets ---
+
 fn install_package(package: &str) {
     let url = format!("https://packages.quantum-os.org/edl/{}/latest", package);
     println!("📦 Downloading package from {url}");
 
-    // Utilise reqwest pour télécharger le module (ajoute reqwest à Cargo.toml)
     match reqwest::blocking::get(&url) {
         Ok(resp) => {
             if resp.status().is_success() {
@@ -158,7 +171,6 @@ fn install_package(package: &str) {
                 file.write_all(code.as_bytes()).expect("Failed to write module");
                 println!("✅ Installed '{}'", package);
 
-                // --- Ajout dans package.edl.json ---
                 let manifest_path = "package.edl.json";
                 let mut manifest: Value = if let Ok(data) = fs::read_to_string(manifest_path) {
                     serde_json::from_str(&data).unwrap_or_else(|_| json!({}))
@@ -166,7 +178,6 @@ fn install_package(package: &str) {
                     json!({})
                 };
 
-                // Ajoute la dépendance
                 if !manifest.get("dependencies").is_some() {
                     manifest["dependencies"] = json!({});
                 }
@@ -175,7 +186,6 @@ fn install_package(package: &str) {
                     .expect("dependencies should be an object");
                 deps.insert(package.to_string(), Value::String("latest".to_string()));
 
-                // Réécrit le fichier
                 let manifest_str = serde_json::to_string_pretty(&manifest).unwrap();
                 fs::write(manifest_path, manifest_str).expect("Failed to update package.edl.json");
                 println!("🔗 Added '{}' to dependencies in package.edl.json", package);
@@ -211,8 +221,6 @@ fn update_package(package: &str) {
 }
 
 fn list_packages() {
-    use std::fs;
-
     let dir = "edl_modules";
     println!("📚 Installed packages:");
     match fs::read_dir(dir) {
@@ -240,10 +248,6 @@ fn list_packages() {
 }
 
 fn init_project() {
-    use std::fs;
-    use std::io::Write;
-
-    // Crée package.edl.json au format JSON si absent
     if !std::path::Path::new("package.edl.json").exists() {
         let mut file = fs::File::create("package.edl.json").expect("Failed to create package.edl.json");
         let content = r#"{
@@ -264,7 +268,6 @@ fn init_project() {
         println!("package.edl.json already exists.");
     }
 
-    // Crée le dossier edl_modules si absent
     if !std::path::Path::new("edl_modules").exists() {
         fs::create_dir("edl_modules").expect("Failed to create edl_modules directory");
         println!("✅ Created edl_modules/");
@@ -276,7 +279,6 @@ fn init_project() {
 }
 
 fn run_script(script: &str) {
-    // 1. Si l'argument finit déjà par ".edl", ne pas rajouter l'extension
     let file = if script.ends_with(".edl") {
         script.to_string()
     } else {
@@ -287,7 +289,6 @@ fn run_script(script: &str) {
         return;
     }
 
-    // 2. Sinon, cherche dans package.edl.json > scripts
     let manifest_path = "package.edl.json";
     if let Ok(data) = fs::read_to_string(manifest_path) {
         if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&data) {
@@ -305,7 +306,71 @@ fn run_script(script: &str) {
         }
     }
 
-    // 3. Sinon, erreur
     eprintln!("❌ Script '{}' not found as a .edl file or in package.edl.json", script);
     std::process::exit(1);
+}
+
+// --- LSP Implementation minimaliste ---
+
+struct Backend {
+    client: Client,
+}
+
+#[tower_lsp::async_trait]
+impl tower_lsp::LanguageServer for Backend {
+    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
+        Ok(InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_string()]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            server_info: Some(ServerInfo {
+                name: "EDL Language Server".to_string(),
+                version: Some("0.1.0".to_string()),
+            }),
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client.log_message(MessageType::INFO, "EDL Language Server initialized!").await;
+    }
+
+    async fn shutdown(&self) -> LspResult<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.client.log_message(MessageType::INFO, format!("File opened: {}", params.text_document.uri)).await;
+    }
+
+    async fn hover(&self, _params: HoverParams) -> LspResult<Option<Hover>> {
+        let contents = HoverContents::Scalar(MarkedString::String("EDL language server hover info".to_string()));
+        Ok(Some(Hover {
+            contents,
+            range: None,
+        }))
+    }
+
+    async fn completion(&self, _params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
+        // Exemple simple, renvoie un mot-clé
+        let items = vec![
+            CompletionItem::new_simple("print".to_string(), "Print statement".to_string()),
+            CompletionItem::new_simple("if".to_string(), "If statement".to_string()),
+        ];
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+}
+
+async fn start_lsp() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend { client });
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
