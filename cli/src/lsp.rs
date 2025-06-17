@@ -1,9 +1,14 @@
-cli/src/lsp.rs
+// cli/src/lsp.rs
 
+use std::pin;
+use std::future;
+use std::marker;
+
+use clap::Parser;
 use tower_lsp::{LspService, Server};
 use tower_lsp::lsp_types::*;
 use std::error::Error;
-use core::{parser::Parser as EdlParser}; // Utilise ton cœur du langage
+use core::{parser::Parser as EdlParser};
 
 pub async fn start_lsp_async() -> Result<(), Box<dyn Error + Send + Sync>> {
     let stdin = tokio::io::stdin();
@@ -14,8 +19,8 @@ pub async fn start_lsp_async() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-pub fn start_lsp() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Tu peux utiliser tokio::main ici ou l'ajouter au binaire
+pub async fn start_lsp() -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Tu peux supprimer cette fonction si tu l'appelles depuis un #[tokio::main]
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?

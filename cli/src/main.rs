@@ -4,20 +4,14 @@ use clap::{Parser, Subcommand};
 use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use std::io::Write;
+mod lsp; 
+use lsp::start_lsp;
 
 // Ajouts indispensables pour résoudre les erreurs avec tower_lsp::async_trait
-use std::pin;
-use std::future;
-use std::marker;
 use std::option::Option;
 
 use core::{parser::Parser as EdlParser, runtime::Interpreter};
 use serde_json::{Value, json};
-
-use tower_lsp::{LspService, Server};
-use tower_lsp::jsonrpc::Result as LspResult;
-use tower_lsp::lsp_types::*;
-use tower_lsp::Client;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -40,12 +34,12 @@ enum Command {
     List,
     /// Initialize a new EDL project
     Init,
-    /// Start the EDL Language Server (LSP)
+    /// Live server system for EDL languages
     Lsp,
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Run { file } => run_script(&file),
@@ -54,8 +48,9 @@ async fn main() {
         Command::Update { package } => update_package(&package),
         Command::List => list_packages(),
         Command::Init => init_project(),
-        Command::Lsp => start_lsp().await,
+        Command::Lsp => start_lsp().await?,
     }
+    Ok(())
 }
 
 fn run_file(file: &str) {
@@ -121,7 +116,7 @@ fn start_repl() {
                             for stmt in stmts {
                                 match interp.eval_stmt(&stmt) {
                                     Ok(val) => {
-                                        if let edl_core::runtime::Value::Null = val {
+                                        if let core::runtime::Value::Null = val {
                                         } else {
                                             println!("{:?}", val);
                                         }
@@ -308,69 +303,4 @@ fn run_script(script: &str) {
 
     eprintln!("❌ Script '{}' not found as a .edl file or in package.edl.json", script);
     std::process::exit(1);
-}
-
-// --- LSP Implementation minimaliste ---
-
-struct Backend {
-    client: Client,
-}
-
-#[tower_lsp::async_trait]
-impl tower_lsp::LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string()]),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            server_info: Some(ServerInfo {
-                name: "EDL Language Server".to_string(),
-                version: Some("0.1.0".to_string()),
-            }),
-        })
-    }
-
-    async fn initialized(&self, _: InitializedParams) {
-        self.client.log_message(MessageType::INFO, "EDL Language Server initialized!").await;
-    }
-
-    async fn shutdown(&self) -> LspResult<()> {
-        Ok(())
-    }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client.log_message(MessageType::INFO, format!("File opened: {}", params.text_document.uri)).await;
-    }
-
-    async fn hover(&self, _params: HoverParams) -> LspResult<Option<Hover>> {
-        let contents = HoverContents::Scalar(MarkedString::String("EDL language server hover info".to_string()));
-        Ok(Some(Hover {
-            contents,
-            range: None,
-        }))
-    }
-
-    async fn completion(&self, _params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
-        // Exemple simple, renvoie un mot-clé
-        let items = vec![
-            CompletionItem::new_simple("print".to_string(), "Print statement".to_string()),
-            CompletionItem::new_simple("if".to_string(), "If statement".to_string()),
-        ];
-        Ok(Some(CompletionResponse::Array(items)))
-    }
-}
-
-async fn start_lsp() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-
-    let (service, socket) = LspService::new(|client| Backend { client });
-    Server::new(stdin, stdout, socket).serve(service).await;
 }

@@ -1,4 +1,4 @@
-# Security Policy- EDL
+# Security Policy - EDL
 
 ## Introduction
 

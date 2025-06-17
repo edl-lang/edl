@@ -285,6 +285,8 @@ impl Interpreter {
                 match op {
                     UnOp::Neg => Ok(Value::Number(-get_num(&right))),
                     UnOp::Not => Ok(Value::Bool(!is_truthy(&right))),
+                    UnOp::Ref => todo!(),
+                    UnOp::Deref => todo!(),
                 }
             }
             Expr::Binary { left, op, right } => {

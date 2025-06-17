@@ -61,9 +61,10 @@ fn remove_task() {
 fn show_menu_system() {
     print("=== Gestionnnaire de pilote système ==="); 
     print("1. "); 
-
+    print("2. "); 
+    print("3. "); 
     print("4. Quitter")
-    print("=======================================")
+    print("======================================="); 
     print("-> entrer le numéro : ");
 }
 
