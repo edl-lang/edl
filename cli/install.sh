@@ -1,17 +1,17 @@
 #!/usr/bin/sh
 set -e
 
-# EDL Install Script
+# EDL CLI Install Script
 
 WORKSPACE_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$WORKSPACE_DIR"
 
 # Build the CLI with cargo
-echo "Building EDL Language..."
-cargo build --release -p edl
+echo "Building EDL CLI..."
+cargo build --release -p cli
 
 # Determine binary name and install location
-BINARY_SRC="target/release/edl-lang"
+BINARY_SRC="target/release/cli"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY_DEST="$INSTALL_DIR/edl"
 

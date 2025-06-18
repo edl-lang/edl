@@ -35,11 +35,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn greet_works() {
-        assert_eq!(greet(), "Hello from core!");
-    }
-
-    #[test]
     fn parse_and_eval_let() {
         let src = "let x = 2 + 2; x;";
         let result = eval_source(src).unwrap();

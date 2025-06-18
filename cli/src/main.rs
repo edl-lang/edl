@@ -39,7 +39,7 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Run { file } => run_script(&file),
@@ -48,7 +48,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Update { package } => update_package(&package),
         Command::List => list_packages(),
         Command::Init => init_project(),
-        Command::Lsp => start_lsp().await?,
+        Command::Lsp => {
+            start_lsp().await.map_err(|e| {
+                eprintln!("Failed to start LSP: {}", e);
+                e
+            })?
+        }
     }
     Ok(())
 }

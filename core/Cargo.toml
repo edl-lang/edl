@@ -1,7 +1,7 @@
 [package]
 name = "core"
-version = "0.1.0"
-edition = "2024"
+version = "1.0.0"
+edition = "2021"
 authors = ["Sky Genesis Enterprise <contact@skygenesisenterprise.com>"]
 description = "Core library for the EDL language, including parser and runtime."
 license = "GPLv3 licence"

@@ -1,14 +1,12 @@
 // cli/src/lsp.rs
 
-use std::pin;
-use std::future;
-use std::marker;
-
-use clap::Parser;
+use async_trait::async_trait;
 use tower_lsp::{LspService, Server};
 use tower_lsp::lsp_types::*;
 use std::error::Error;
-use core::{parser::Parser as EdlParser};
+
+// ✅ Assuming core is a separate crate with a parser module
+use core::parser::Parser as EdlParser;
 
 pub async fn start_lsp_async() -> Result<(), Box<dyn Error + Send + Sync>> {
     let stdin = tokio::io::stdin();
@@ -19,8 +17,8 @@ pub async fn start_lsp_async() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+// Optional wrapper for sync context; used by main
 pub async fn start_lsp() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Tu peux supprimer cette fonction si tu l'appelles depuis un #[tokio::main]
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -32,7 +30,7 @@ struct Backend {
     client: tower_lsp::Client,
 }
 
-#[tower_lsp::async_trait]
+#[async_trait]
 impl tower_lsp::LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult, tower_lsp::jsonrpc::Error> {
         Ok(InitializeResult {
@@ -45,7 +43,9 @@ impl tower_lsp::LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.client.log_message(MessageType::INFO, "EDL Language Server initialized").await;
+        self.client
+            .log_message(MessageType::INFO, "EDL Language Server initialized")
+            .await;
     }
 
     async fn shutdown(&self) -> Result<(), tower_lsp::jsonrpc::Error> {
@@ -55,9 +55,18 @@ impl tower_lsp::LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let code = params.text_document.text;
         let mut parser = EdlParser::new(&code);
+
         match parser.parse() {
-            Ok(_) => self.client.log_message(MessageType::INFO, "Parsed successfully").await,
-            Err(err) => self.client.log_message(MessageType::ERROR, format!("Parse error: {:?}", err)).await,
+            Ok(_) => {
+                self.client
+                    .log_message(MessageType::INFO, "Parsed successfully")
+                    .await;
+            }
+            Err(err) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Parse error: {:?}", err))
+                    .await;
+            }
         }
     }
 }
