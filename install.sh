@@ -8,10 +8,10 @@ cd "$WORKSPACE_DIR"
 
 # Build the CLI with cargo
 echo "Building EDL Language..."
-cargo build --release -p edl
+cargo build --release -p cli
 
 # Determine binary name and install location
-BINARY_SRC="target/release/edl-lang"
+BINARY_SRC="target/release/cli"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY_DEST="$INSTALL_DIR/edl"
 

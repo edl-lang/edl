@@ -410,6 +410,7 @@ dependencies = [
  "error",
  "fs",
  "io",
+ "lazy_static",
  "marker",
  "nom 7.1.3",
  "option",

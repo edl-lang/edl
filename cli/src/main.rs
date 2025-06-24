@@ -4,8 +4,6 @@ use clap::{Parser, Subcommand};
 use rustyline::{Editor, error::ReadlineError};
 use std::fs;
 use std::io::Write;
-mod lsp; 
-use lsp::start_lsp;
 
 // Ajouts indispensables pour résoudre les erreurs avec tower_lsp::async_trait
 use std::option::Option;
@@ -34,12 +32,10 @@ enum Command {
     List,
     /// Initialize a new EDL project
     Init,
-    /// Live server system for EDL languages
-    Lsp,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.cmd {
         Command::Run { file } => run_script(&file),
@@ -48,12 +44,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Command::Update { package } => update_package(&package),
         Command::List => list_packages(),
         Command::Init => init_project(),
-        Command::Lsp => {
-            start_lsp().await.map_err(|e| {
-                eprintln!("Failed to start LSP: {}", e);
-                e
-            })?
-        }
     }
     Ok(())
 }
