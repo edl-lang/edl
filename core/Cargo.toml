@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Sky Genesis Enterprise <contact@skygenesisenterprise.com>"]
 description = "Core library for the EDL language, including parser and runtime."
 license = "GPLv3 licence"
-repository = "https://github.com/Sky-Genesis-Enterprise/edl"
+repository = "https://github.com/edl-lang/edl"
 
 [dependencies]
 # Gestion des erreurs ergonomique
