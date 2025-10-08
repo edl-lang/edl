@@ -33,7 +33,7 @@ EDL is a simple and lightweight language designed for quickly writing scripts an
 2. Clone the repository:
 
    ```bash
-   git clone https://github.com/Sky-Genesis-Enterprise/edl.git
+   git clone https://github.com/edl-lang/edl.git
    cd edl
    ```
 3. Build the CLI binary:
@@ -181,4 +181,4 @@ Contributions welcome! To contribute:
 
 ## License
 
-Project licensed under the AGPLv3 License. See the [LICENSE](LICENSE) file for details.
+Project licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
